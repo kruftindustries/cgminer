@@ -550,6 +550,24 @@ static bool gc3355_write_register(struct cgpu_info *gridseed, uint32_t reg_addr,
 	return true;
 }
 
+static void gc3355_switch_leds(struct cgpu_info *gridseed) {
+	uint32_t reg_value;
+
+	// Set GPIOB pins 0 and 1 as general purpose output, open-drain, 50 MHz max
+	if (!gc3355_read_register(gridseed, GRIDSEED_GPIOB_BASE + GRIDSEED_CRL_OFFSET, &reg_value)) {
+		applog(LOG_DEBUG, "Failed to read GPIOA CRL register from %i", gridseed->device_id);
+		return;
+	}
+	reg_value = (reg_value & 0xffffff00) | 0x00000077;
+	if (!gc3355_write_register(gridseed, GRIDSEED_GPIOB_BASE + GRIDSEED_CRL_OFFSET, reg_value)) {
+		applog(LOG_DEBUG, "Failed to write GPIOA CRL register from %i", gridseed->device_id);
+		return;
+	}
+
+	applog(LOG_NOTICE, "%s%d: Turned off GC3355 LEDs",
+			gridseed->drv->name, gridseed->device_id);
+}
+
 static void gc3355_switch_voltage(struct cgpu_info *gridseed) {
 	uint32_t reg_value;
 
@@ -670,6 +688,8 @@ static void gc3355_init(struct cgpu_info *gridseed, GRIDSEED_INFO *info)
 
 	if (info->voltage)
 		gc3355_switch_voltage(gridseed);
+	if (info->led)
+		gc3355_switch_leds(gridseed);
 }
 
 static void set_freq_cmd(GRIDSEED_INFO *info, int pll_r, int pll_f, int pll_od)
@@ -758,6 +778,9 @@ another:
 	}
 	else if (strcasecmp(p, "voltage")==0) {
 		info->voltage = (tmp != 0) ? tmp : info->voltage;
+	}
+	else if (strcasecmp(p, "led_off")==0) {
+		info->led = (tmp != 0) ? tmp : info->led;
 	}
 	else if (strcasecmp(p, "per_chip_stats")==0) {
 		info->per_chip_stats = (tmp != 0) ? tmp : info->per_chip_stats;
@@ -1017,6 +1040,7 @@ static struct cgpu_info *gridseed_detect_one_scrypt_proxy()
 	info->usefifo = GRIDSEED_DEFAULT_USEFIFO;
 	info->btcore = GRIDSEED_DEFAULT_BTCORE;
 	info->voltage = 0;
+	info->led = 0;
 	info->per_chip_stats = 0;
 	memset(info->nonce_count, 0, sizeof(info->nonce_count));
 	memset(info->error_count, 0, sizeof(info->error_count));
@@ -1076,6 +1100,7 @@ static struct cgpu_info *gridseed_detect_one_usb(struct libusb_device *dev, stru
 	info->usefifo = GRIDSEED_DEFAULT_USEFIFO;
 	info->btcore = GRIDSEED_DEFAULT_BTCORE;
 	info->voltage = 0;
+	info->led = 0;
 	info->per_chip_stats = 0;
 	memset(info->nonce_count, 0, sizeof(info->nonce_count));
 	memset(info->error_count, 0, sizeof(info->error_count));
