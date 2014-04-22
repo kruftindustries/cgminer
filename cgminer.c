@@ -54,6 +54,7 @@ char *curly = ":D";
 #include "compat.h"
 #include "miner.h"
 #include "bench_block.h"
+#include "scrypt.h"
 #ifdef USE_USBUTILS
 #include "usbutils.h"
 #endif
@@ -159,6 +160,9 @@ time_t last_getwork;
 
 #if defined(USE_USBUTILS)
 int nDevs;
+#endif
+#ifdef USE_SCRYPT
+bool opt_scrypt;
 #endif
 bool opt_restart = true;
 bool opt_nogpu;
@@ -1369,6 +1373,11 @@ static struct opt_table opt_config_table[] = {
 	OPT_WITH_CBARG("--sched-stop",
 		     set_sched_stop, NULL, &opt_set_sched_stop,
 		     "Set a time of day in HH:MM to stop mining (will quit without a start time)"),
+#ifdef USE_SCRYPT
+	OPT_WITHOUT_ARG("--scrypt",
+		     opt_set_bool, &opt_scrypt,
+		     "Use the scrypt algorithm for mining"),
+#endif
 	OPT_WITH_CBARG("--sharelog",
 		     set_sharelog, NULL, &opt_set_sharelog,
 		     "Append share log to file"),
@@ -1645,6 +1654,9 @@ static char *opt_verusage_and_exit(const char *extra)
 #endif
 #ifdef USE_SPONDOOLIES
 		"spondoolies "
+#endif
+#ifdef USE_SCRYPT
+		"scrypt "
 #endif
 		"mining support.\n"
 		, packagename);
@@ -3151,8 +3163,8 @@ static bool submit_upstream_work(struct work *work, CURL *curl, bool resubmit)
 
 			snprintf(worktime, sizeof(worktime),
 				" <-%08lx.%08lx M:%c D:%1.*f G:%02d:%02d:%02d:%1.3f %s (%1.3f) W:%1.3f (%1.3f) S:%1.3f R:%02d:%02d:%02d",
-				(unsigned long)be32toh(*(uint32_t *)&(work->data[28])),
-				(unsigned long)be32toh(*(uint32_t *)&(work->data[24])),
+				(unsigned long)be32toh(*(uint32_t *)&(work->data[opt_scrypt ? 32 : 28])),
+				(unsigned long)be32toh(*(uint32_t *)&(work->data[opt_scrypt ? 28 : 24])),
 				work->getwork_mode, diffplaces, work->work_difficulty,
 				tm_getwork.tm_hour, tm_getwork.tm_min,
 				tm_getwork.tm_sec, getwork_time, workclone,
@@ -3399,6 +3411,8 @@ static double diff_from_target(void *target)
 	double d64, dcut64;
 
 	d64 = truediffone;
+	if (opt_scrypt)
+		d64 *= (double)65536;
 	dcut64 = le256todouble(target);
 	if (unlikely(!dcut64))
 		dcut64 = 1;
@@ -4214,6 +4228,8 @@ uint64_t share_diff(const struct work *work)
 	uint64_t ret;
 
 	d64 = truediffone;
+	if (opt_scrypt)
+		d64 *= (double)65536;
 	s64 = le256todouble(work->hash);
 	if (unlikely(!s64))
 		s64 = 0;
@@ -4246,6 +4262,14 @@ static void regen_hash(struct work *work)
 	flip80(swap32, data32);
 	sha256(swap, 80, hash1);
 	sha256(hash1, 32, (unsigned char *)(work->hash));
+}
+
+static void rebuild_hash(struct work *work)
+{
+	if (opt_scrypt)
+		scrypt_regenhash(work);
+	else
+		regen_hash(work);
 }
 
 static bool cnx_needed(struct pool *pool);
@@ -6683,6 +6707,8 @@ void set_target(unsigned char *dest_target, double diff)
 	}
 
 	d64 = truediffone;
+	if (opt_scrypt)
+		d64 *= (double)65536;
 	d64 /= diff;
 
 	dcut64 = d64 / bits192;
@@ -7065,7 +7091,7 @@ static void rebuild_nonce(struct work *work, uint32_t nonce)
 
 	*work_nonce = htole32(nonce);
 
-	regen_hash(work);
+	rebuild_hash(work);
 }
 
 /* For testing a nonce against diff 1 */
@@ -7074,7 +7100,7 @@ bool test_nonce(struct work *work, uint32_t nonce)
 	uint32_t *hash_32 = (uint32_t *)(work->hash + 28);
 
 	rebuild_nonce(work, nonce);
-	return (*hash_32 == 0);
+	return (*hash_32 <= (opt_scrypt ? 0x0000ffffUL : 0));
 }
 
 /* For testing a nonce against an arbitrary diff */
@@ -7083,7 +7109,7 @@ bool test_nonce_diff(struct work *work, uint32_t nonce, double diff)
 	uint64_t *hash64 = (uint64_t *)(work->hash + 24), diff64;
 
 	rebuild_nonce(work, nonce);
-	diff64 = 0x00000000ffff0000ULL;
+	diff64 = opt_scrypt ? 0x0000ffff00000000ULL : 0x00000000ffff0000ULL;
 	diff64 /= diff;
 
 	return (le64toh(*hash64) <= diff64);
@@ -7094,6 +7120,9 @@ static void update_work_stats(struct thr_info *thr, struct work *work)
 	double test_diff = current_diff;
 
 	work->share_diff = share_diff(work);
+
+	if (opt_scrypt)
+		test_diff *= (double)65536;
 
 	if (unlikely(work->share_diff >= test_diff)) {
 		work->block = true;
@@ -7236,6 +7265,25 @@ static void hash_sole_work(struct thr_info *mythr)
 			break;
 		}
 		work->device_diff = MIN(drv->working_diff, work->work_difficulty);
+#ifdef USE_SCRYPT
+		/* Dynamically adjust the working diff even if the target
+		 * diff is very high to ensure we can still validate scrypt is
+		 * returning shares. */
+		if (opt_scrypt) {
+			double wu;
+
+			wu = total_diff1 / total_secs * 60;
+			if (wu > 30 && drv->working_diff < drv->max_diff &&
+			    drv->working_diff < work->work_difficulty) {
+				drv->working_diff++;
+				applog(LOG_DEBUG, "Driver %s working diff changed to %.0f",
+					drv->dname, drv->working_diff);
+				work->device_diff = MIN(drv->working_diff, work->work_difficulty);
+			} else if (drv->working_diff > work->work_difficulty)
+				drv->working_diff = work->work_difficulty;
+			set_target(work->device_target, work->device_diff);
+		}
+#endif
 
 		do {
 			cgtime(&tv_start);
@@ -9201,6 +9249,9 @@ int main(int argc, char *argv[])
 	if (opt_benchmark || opt_benchfile) {
 		struct pool *pool;
 
+		if (opt_scrypt)
+			quit(1, "Cannot use benchmark mode with scrypt");
+
 		pool = add_pool();
 		pool->rpc_url = malloc(255);
 		if (opt_benchfile)
@@ -9247,8 +9298,9 @@ int main(int argc, char *argv[])
 	if (want_per_device_stats)
 		opt_log_output = true;
 
+	/* Use a shorter scantime for scrypt */
 	if (opt_scantime < 0)
-		opt_scantime = 60;
+		opt_scantime = opt_scrypt ? 30 : 60;
 
 	total_control_threads = 8;
 	control_thr = calloc(total_control_threads, sizeof(*thr));

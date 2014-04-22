@@ -46,6 +46,10 @@ cgminer_SOURCES	+= logging.c
 
 cgminer_SOURCES	+= klist.h klist.c
 
+if HAS_SCRYPT
+cgminer_SOURCES += scrypt.c scrypt.h
+endif
+
 if NEED_FPGAUTILS
 cgminer_SOURCES += fpgautils.c fpgautils.h
 endif

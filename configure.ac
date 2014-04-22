@@ -137,6 +137,17 @@ if test "x$ants1" = xyes; then
 fi
 AM_CONDITIONAL([HAS_ANT_S1], [test x$ants1 = xyes])
 
+scrypt="no"
+
+AC_ARG_ENABLE([scrypt],
+	[AC_HELP_STRING([--enable-scrypt],[Compile support for scrypt mining (default disabled)])],
+	[scrypt=$enableval]
+	)
+if test "x$scrypt" = xyes; then
+	AC_DEFINE([USE_SCRYPT], [1], [Defined to 1 if scrypt support is wanted])
+fi
+AM_CONDITIONAL([HAS_SCRYPT], [test x$scrypt = xyes])
+
 avalon="no"
 
 AC_ARG_ENABLE([avalon],
@@ -520,6 +531,12 @@ fi
 
 echo "  curses.TUI...........: $cursesmsg"
 
+
+if test "x$scrypt" != xno; then
+	echo "  scrypt...............: Enabled"
+else
+	echo "  scrypt...............: Disabled"
+fi
 
 echo
 if test "x$ants1" = xyes; then
