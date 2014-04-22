@@ -30,7 +30,7 @@
 	defined(USE_HASHFAST) || defined(USE_BITFURY) || defined(USE_KLONDIKE) || \
 	defined(USE_KNC) || defined(USE_BAB) || defined(USE_DRILLBIT) || \
 	defined(USE_MINION) || defined(USE_COINTERRA) || defined(USE_BITMINE_A1) || \
-	defined(USE_ANT_S1) || defined(USE_SPONDOOLIES)
+	defined(USE_ANT_S1) || defined(USE_SPONDOOLIES) || defined(USE_GRIDSEED)
 #define HAVE_AN_ASIC 1
 #endif
 
@@ -198,6 +198,9 @@ static const char *DEVICECODE = ""
 #endif
 #ifdef USE_SPONDOOLIES
 			"SPN "
+#endif
+#ifdef USE_GRIDSEED
+			"GSD "
 #endif
 
 			"";
@@ -919,6 +922,7 @@ static struct api_data *api_add_data_full(struct api_data *root, char *name, enu
 			case API_DOUBLE:
 			case API_ELAPSED:
 			case API_MHS:
+			case API_KHS:
 			case API_MHTOTAL:
 			case API_UTILITY:
 			case API_FREQ:
@@ -1040,6 +1044,11 @@ struct api_data *api_add_time(struct api_data *root, char *name, time_t *data, b
 struct api_data *api_add_mhs(struct api_data *root, char *name, double *data, bool copy_data)
 {
 	return api_add_data_full(root, name, API_MHS, (void *)data, copy_data);
+}
+
+struct api_data *api_add_khs(struct api_data *root, char *name, double *data, bool copy_data)
+{
+	return api_add_data_full(root, name, API_KHS, (void *)data, copy_data);
 }
 
 struct api_data *api_add_mhtotal(struct api_data *root, char *name, double *data, bool copy_data)
@@ -1218,6 +1227,9 @@ static struct api_data *print_data(struct io_data *io_data, struct api_data *roo
 			case API_FREQ:
 			case API_MHS:
 				snprintf(buf, sizeof(buf), "%.2f", *((double *)(root->data)));
+				break;
+			case API_KHS:
+				snprintf(buf, sizeof(buf), "%.1f", *((double *)(root->data)));
 				break;
 			case API_VOLTS:
 			case API_AVG:
@@ -2010,6 +2022,20 @@ static void ascstatus(struct io_data *io_data, int asc, bool isjson, bool precom
 		root = api_add_mhs(root, "MHS 1m", &cgpu->rolling1, false);
 		root = api_add_mhs(root, "MHS 5m", &cgpu->rolling5, false);
 		root = api_add_mhs(root, "MHS 15m", &cgpu->rolling15, false);
+		if (opt_scrypt) {
+			double khs = (cgpu->total_mhashes / dev_runtime) * 1000;
+			double khs_rolling = cgpu->rolling * 1000;
+			double khs_rolling1 = cgpu->rolling1 * 1000;
+			double khs_rolling5 = cgpu->rolling5 * 1000;
+			double khs_rolling15 = cgpu->rolling15 * 1000;
+			root = api_add_khs(root, "KHS av", &khs, true);
+			char khsname[27];
+			sprintf(khsname, "KHS %ds", opt_log_interval);
+			root = api_add_khs(root, khsname, &khs_rolling, true);
+			root = api_add_khs(root, "KHS 1m", &khs_rolling1, true);
+			root = api_add_khs(root, "KHS 5m", &khs_rolling5, true);
+			root = api_add_khs(root, "KHS 15m", &khs_rolling15, true);
+		}
 		root = api_add_int(root, "Accepted", &(cgpu->accepted), false);
 		root = api_add_int(root, "Rejected", &(cgpu->rejected), false);
 		root = api_add_int(root, "Hardware Errors", &(cgpu->hw_errors), false);
@@ -2097,6 +2123,20 @@ static void pgastatus(struct io_data *io_data, int pga, bool isjson, bool precom
 		root = api_add_mhs(root, "MHS 1m", &cgpu->rolling1, false);
 		root = api_add_mhs(root, "MHS 5m", &cgpu->rolling5, false);
 		root = api_add_mhs(root, "MHS 15m", &cgpu->rolling15, false);
+		if (opt_scrypt) {
+			double khs = (cgpu->total_mhashes / dev_runtime) * 1000;
+			double khs_rolling = cgpu->rolling * 1000;
+			double khs_rolling1 = cgpu->rolling1 * 1000;
+			double khs_rolling5 = cgpu->rolling5 * 1000;
+			double khs_rolling15 = cgpu->rolling15 * 1000;
+			root = api_add_khs(root, "KHS av", &khs, true);
+			char khsname[27];
+			sprintf(khsname, "KHS %ds", opt_log_interval);
+			root = api_add_khs(root, khsname, &khs_rolling, true);
+			root = api_add_khs(root, "KHS 1m", &khs_rolling1, true);
+			root = api_add_khs(root, "KHS 5m", &khs_rolling5, true);
+			root = api_add_khs(root, "KHS 15m", &khs_rolling15, true);
+		}
 		root = api_add_int(root, "Accepted", &(cgpu->accepted), false);
 		root = api_add_int(root, "Rejected", &(cgpu->rejected), false);
 		root = api_add_int(root, "Hardware Errors", &(cgpu->hw_errors), false);
@@ -2573,6 +2613,20 @@ static void summary(struct io_data *io_data, __maybe_unused SOCKETTYPE c, __mayb
 	root = api_add_mhs(root, "MHS 1m", &rolling1, false);
 	root = api_add_mhs(root, "MHS 5m", &rolling5, false);
 	root = api_add_mhs(root, "MHS 15m", &rolling15, false);
+	if (opt_scrypt) {
+		double khs = mhs * 1000;
+		double khs_rolling = total_rolling * 1000;
+		double khs_rolling1 = rolling1 * 1000;
+		double khs_rolling5 = rolling5 * 1000;
+		double khs_rolling15 = rolling15 * 1000;
+		root = api_add_khs(root, "KHS av", &khs, true);
+		char khsname[27];
+		sprintf(khsname, "KHS %ds", opt_log_interval);
+		root = api_add_khs(root, khsname, &khs_rolling, true);
+		root = api_add_khs(root, "KHS 1m", &khs_rolling1, true);
+		root = api_add_khs(root, "KHS 5m", &khs_rolling5, true);
+		root = api_add_khs(root, "KHS 15m", &khs_rolling15, true);
+	}
 	root = api_add_uint(root, "Found Blocks", &(found_blocks), true);
 	root = api_add_int(root, "Getworks", &(total_getworks), true);
 	root = api_add_int(root, "Accepted", &(total_accepted), true);

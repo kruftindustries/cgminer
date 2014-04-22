@@ -329,6 +329,19 @@ fi
 AM_CONDITIONAL([HAS_SPONDOOLIES], [test x$spondoolies = xyes])
 
 
+
+gridseed="no"
+
+AC_ARG_ENABLE([gridseed],
+	[AC_HELP_STRING([--enable-gridseed],[Compile support for GridSeed (default disabled)])],
+	[gridseed=$enableval]
+	)
+if test "x$gridseed" = xyes; then
+	AC_DEFINE([USE_GRIDSEED], [1], [Defined to 1 if GridSeed support is wanted])
+fi
+AM_CONDITIONAL([HAS_GRIDSEED], [test x$gridseed = xyes])
+
+
 curses="auto"
 
 AC_ARG_WITH([curses],
@@ -353,7 +366,7 @@ else
 	])
 fi
 
-if test x$avalon$bitforce$bitfury$modminer$bflsc$icarus$hashfast$klondike$drillbit$cointerra$ants1 != xnonononononononononono; then
+if test x$avalon$bitforce$bitfury$modminer$bflsc$icarus$hashfast$klondike$drillbit$cointerra$ants1$gridseed != xnononononononononononono; then
 	want_usbutils=true
 else
 	want_usbutils=false
@@ -641,7 +654,13 @@ else
 	echo "  ModMiner.FPGAs.......: Disabled"
 fi
 
-if test "x$avalon$avalon2$bab$bflsc$bitforce$bitfury$hashfast$icarus$klondike$knc$modminer$drillbit$minion$cointerra$bitmine_A1$ants1$spondoolies" = xnonononononononononononononononono; then
+if test "x$gridseed" = xyes; then
+	echo "  GridSeed.ASICs.......: Enabled"
+else
+	echo "  GridSeed.ASICs.......: Disabled"
+fi
+
+if test "x$avalon$avalon2$bab$bflsc$bitforce$bitfury$hashfast$icarus$klondike$knc$modminer$drillbit$minion$cointerra$bitmine_A1$ants1$spondoolies$gridseed" = xnononononononononononononononononono; then
 	AC_MSG_ERROR([No mining configured in])
 fi
 

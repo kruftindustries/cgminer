@@ -249,7 +249,8 @@ static inline int fsync (int fd)
 	DRIVER_ADD_COMMAND(ants1) \
 	DRIVER_ADD_COMMAND(avalon2) \
 	DRIVER_ADD_COMMAND(avalon) \
-	DRIVER_ADD_COMMAND(spondoolies)
+	DRIVER_ADD_COMMAND(spondoolies) \
+	DRIVER_ADD_COMMAND(gridseed)
 
 #define DRIVER_PARSE_COMMANDS(DRIVER_ADD_COMMAND) \
 	FPGA_PARSE_COMMANDS(DRIVER_ADD_COMMAND) \
@@ -1018,6 +1019,11 @@ extern cgsem_t usb_resource_sem;
 #ifdef USE_BITFORCE
 extern bool opt_bfl_noncerange;
 #endif
+#ifdef USE_GRIDSEED
+extern char *opt_gridseed_options;
+extern char *opt_gridseed_freq;
+extern bool opt_gridseed_proxy;
+#endif
 extern int swork_id;
 
 #if LOCK_TRACKING
@@ -1483,6 +1489,7 @@ enum api_data_type {
 	API_TIMEVAL,
 	API_TIME,
 	API_MHS,
+	API_KHS,
 	API_MHTOTAL,
 	API_TEMP,
 	API_UTILITY,
@@ -1520,6 +1527,7 @@ extern struct api_data *api_add_bool(struct api_data *root, char *name, bool *da
 extern struct api_data *api_add_timeval(struct api_data *root, char *name, struct timeval *data, bool copy_data);
 extern struct api_data *api_add_time(struct api_data *root, char *name, time_t *data, bool copy_data);
 extern struct api_data *api_add_mhs(struct api_data *root, char *name, double *data, bool copy_data);
+extern struct api_data *api_add_khs(struct api_data *root, char *name, double *data, bool copy_data);
 extern struct api_data *api_add_mhstotal(struct api_data *root, char *name, double *data, bool copy_data);
 extern struct api_data *api_add_temp(struct api_data *root, char *name, float *data, bool copy_data);
 extern struct api_data *api_add_utility(struct api_data *root, char *name, double *data, bool copy_data);

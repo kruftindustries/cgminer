@@ -98,6 +98,10 @@ char *curly = ":D";
 #include "driver-bitmain.h"
 #endif
 
+#ifdef USE_GRIDSEED
+#include "driver-gridseed.h"
+#endif
+
 #if defined(USE_BITFORCE) || defined(USE_ICARUS) || defined(USE_AVALON) || defined(USE_AVALON2) || defined(USE_MODMINER)
 #	define USE_FPGA
 #endif
@@ -240,6 +244,11 @@ static char *opt_set_bitmain_freq;
 #endif
 #ifdef USE_HASHFAST
 static char *opt_set_hfa_fan;
+#endif
+#ifdef USE_GRIDSEED
+char *opt_gridseed_options = NULL;
+char *opt_gridseed_freq = NULL;
+bool opt_gridseed_proxy = false;
 #endif
 static char *opt_set_null;
 
@@ -1235,6 +1244,17 @@ static struct opt_table opt_config_table[] = {
 	OPT_WITHOUT_ARG("--fix-protocol",
 			opt_set_bool, &opt_fix_protocol,
 			"Do not redirect to a different getwork protocol (eg. stratum)"),
+#ifdef USE_GRIDSEED
+	OPT_WITH_ARG("--gridseed-options",
+			opt_set_charp, NULL, &opt_gridseed_options,
+			opt_hidden),
+	OPT_WITH_ARG("--gridseed-freq",
+			opt_set_charp, NULL, &opt_gridseed_freq,
+			opt_hidden),
+	OPT_WITHOUT_ARG("--gridseed-proxy",
+			opt_set_bool, &opt_gridseed_proxy,
+			opt_hidden),
+#endif
 #ifdef USE_HASHFAST
 	OPT_WITHOUT_ARG("--hfa-dfu-boot",
 			opt_set_bool, &opt_hfa_dfu_boot,
@@ -1654,6 +1674,9 @@ static char *opt_verusage_and_exit(const char *extra)
 #endif
 #ifdef USE_SPONDOOLIES
 		"spondoolies "
+#endif
+#ifdef USE_GRIDSEED
+		"GridSeed "
 #endif
 #ifdef USE_SCRYPT
 		"scrypt "
@@ -5720,7 +5743,7 @@ static void thread_reportout(struct thr_info *thr)
 	thr->cgpu->device_last_well = time(NULL);
 }
 
-static void hashmeter(int thr_id, uint64_t hashes_done)
+static void hashmeter(int thr_id, double hashes_done)
 {
 	bool showlog = false;
 	double tv_tdiff;
@@ -5754,7 +5777,7 @@ static void hashmeter(int thr_id, uint64_t hashes_done)
 		device_tdiff = tdiff(&total_tv_end, &cgpu->last_message_tv);
 		copy_time(&cgpu->last_message_tv, &total_tv_end);
 		thr_mhs = (double)hashes_done / device_tdiff / 1000000;
-		applog(LOG_DEBUG, "[thread %d: %"PRIu64" hashes, %.1f mhash/sec]",
+		applog(LOG_DEBUG, "[thread %d: %.0f hashes, %.1f mhash/sec]",
 		       thr_id, hashes_done, thr_mhs);
 		hashes_done /= 1000000;
 

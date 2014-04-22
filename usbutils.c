@@ -71,6 +71,7 @@ static cgtimer_t usb11_cgt;
 #define KLONDIKE_TIMEOUT_MS 999
 #define COINTERRA_TIMEOUT_MS 999
 #define HASHFAST_TIMEOUT_MS 999
+#define GRIDSEED_TIMEOUT_MS 999
 
 /* The safety timeout we use, cancelling async transfers on windows that fail
  * to timeout on their own. */
@@ -84,6 +85,7 @@ static cgtimer_t usb11_cgt;
 #define KLONDIKE_TIMEOUT_MS 200
 #define COINTERRA_TIMEOUT_MS 200
 #define HASHFAST_TIMEOUT_MS 500
+#define GRIDSEED_TIMEOUT_MS 200
 #endif
 
 #define USB_EPS(_intx, _epinfosx) { \
@@ -343,6 +345,45 @@ static struct usb_epinfo ants1_epinfos[] = {
 
 static struct usb_intinfo ants1_ints[] = {
 	USB_EPS(0, ants1_epinfos)
+};
+#endif
+
+#ifdef USE_GRIDSEED
+static struct usb_epinfo gsd_epinfos[] = {
+//	{ LIBUSB_TRANSFER_TYPE_INTERRUPT,	8,	EPI(2), 0, 0 },
+	{ LIBUSB_TRANSFER_TYPE_BULK,	64,	EPI(1), 0, 0 },
+	{ LIBUSB_TRANSFER_TYPE_BULK,	64,	EPO(3), 0, 0 }
+};
+
+static struct usb_intinfo gsd_ints[] = {
+	USB_EPS(1, gsd_epinfos)
+};
+
+static struct usb_epinfo gsd1_epinfos[] = {
+	{ LIBUSB_TRANSFER_TYPE_BULK,	64,	EPI(1), 0, 0 },
+	{ LIBUSB_TRANSFER_TYPE_BULK,	64,	EPO(1), 0, 0 }
+};
+
+static struct usb_intinfo gsd1_ints[] = {
+	USB_EPS(0, gsd1_epinfos)
+};
+
+static struct usb_epinfo gsd2_epinfos[] = {
+	{ LIBUSB_TRANSFER_TYPE_BULK,	512,	EPI(1), 0, 0 },
+	{ LIBUSB_TRANSFER_TYPE_BULK,	512,	EPO(2), 0, 0 }
+};
+
+static struct usb_intinfo gsd2_ints[] = {
+	USB_EPS(0, gsd2_epinfos)
+};
+
+static struct usb_epinfo gsd3_epinfos[] = {
+	{ LIBUSB_TRANSFER_TYPE_BULK,	64,	EPI(3), 0, 0 },
+	{ LIBUSB_TRANSFER_TYPE_BULK,	64,	EPO(2), 0, 0 }
+};
+
+static struct usb_intinfo gsd3_ints[] = {
+	USB_EPS(0, gsd3_epinfos)
 };
 #endif
 
@@ -634,6 +675,53 @@ static struct usb_find_devices find_dev[] = {
 		.timeout = ANT_S1_TIMEOUT_MS,
 		.latency = LATENCY_ANTS1,
 		INTINFO(ants1_ints) },
+#endif
+#ifdef USE_GRIDSEED
+	{
+		.drv = DRIVER_gridseed,
+		.name = "GSD",
+		.ident = IDENT_GSD,
+		.idVendor = 0x0483,
+		.idProduct = 0x5740,
+		.iManufacturer = "STMicroelectronics",
+		.iProduct = "STM32 Virtual COM Port  ",
+		.config = 1,
+		.timeout = GRIDSEED_TIMEOUT_MS,
+		.latency = LATENCY_STD,
+		INTINFO(gsd_ints) },
+	{
+		.drv = DRIVER_gridseed,
+		.name = "GSD",
+		.ident = IDENT_GSD1,
+		.idVendor = 0x10c4,
+		.idProduct = 0xea60,
+		.iProduct = "CP2102 USB to UART Bridge Controller",
+		.config = 1,
+		.timeout = GRIDSEED_TIMEOUT_MS,
+		.latency = LATENCY_STD,
+		INTINFO(gsd1_ints) },
+	{
+		.drv = DRIVER_gridseed,
+		.name = "GSD",
+		.ident = IDENT_GSD2,
+		.idVendor = IDVENDOR_FTDI,
+		.idProduct = 0x6010,
+		.iProduct = "Dual RS232-HS",
+		.config = 1,
+		.timeout = GRIDSEED_TIMEOUT_MS,
+		.latency = LATENCY_STD,
+		INTINFO(gsd2_ints) },
+	{
+		.drv = DRIVER_gridseed,
+		.name = "GSD",
+		.ident = IDENT_GSD3,
+		.idVendor = 0x067b,
+		.idProduct = 0x2303,
+		.iProduct = "USB-Serial Controller",
+		.config = 1,
+		.timeout = GRIDSEED_TIMEOUT_MS,
+		.latency = LATENCY_STD,
+		INTINFO(gsd3_ints) },
 #endif
 	{ DRIVER_MAX, NULL, 0, 0, 0, NULL, NULL, 0, 0, 0, 0, NULL }
 };
