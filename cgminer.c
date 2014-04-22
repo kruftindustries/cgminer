@@ -248,7 +248,7 @@ static char *opt_set_hfa_fan;
 #ifdef USE_GRIDSEED
 char *opt_gridseed_options = NULL;
 char *opt_gridseed_freq = NULL;
-bool opt_gridseed_proxy = false;
+char *opt_gridseed_override = NULL;
 #endif
 static char *opt_set_null;
 
@@ -1251,8 +1251,8 @@ static struct opt_table opt_config_table[] = {
 	OPT_WITH_ARG("--gridseed-freq",
 			opt_set_charp, NULL, &opt_gridseed_freq,
 			opt_hidden),
-	OPT_WITHOUT_ARG("--gridseed-proxy",
-			opt_set_bool, &opt_gridseed_proxy,
+	OPT_WITH_ARG("--gridseed-override",
+			opt_set_charp, NULL, &opt_gridseed_override,
 			opt_hidden),
 #endif
 #ifdef USE_HASHFAST

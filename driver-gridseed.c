@@ -845,6 +845,37 @@ next:
 	return true;
 }
 
+static bool get_override(GRIDSEED_INFO *info, char *options)
+{
+	char *ss, *p, *colon, *semi;
+	bool ret = false;
+
+	if (options == NULL)
+		return false;
+
+	ss = strdup(options);
+	p  = ss;
+
+	do {
+		semi = strchr(p, ';');
+		if (semi != NULL)
+			*semi = '\0';
+		colon = strchr(p, ':');
+		if (colon == NULL)
+			continue;
+		*colon = '\0';
+
+		if (strcasecmp(p, info->serial) == 0) {
+			ret = get_options(info, colon + 1);
+			break;
+		}
+	} while (semi != NULL && (p = semi + 1));
+
+	free(ss);
+
+	return ret;
+}
+
 static int gridseed_cp210x_init(struct cgpu_info *gridseed, int interface)
 {
 	// Enable the UART
@@ -1113,6 +1144,7 @@ static struct cgpu_info *gridseed_detect_one_usb(struct libusb_device *dev, stru
 
 	get_options(info, opt_gridseed_options);
 	get_freq(info, opt_gridseed_freq);
+	get_override(info, opt_gridseed_override);
 
 	gridseed->usbdev->usb_type = USB_TYPE_STD;
 	if (gridseed_initialise(gridseed, info)) {

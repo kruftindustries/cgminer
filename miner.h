@@ -1022,7 +1022,7 @@ extern bool opt_bfl_noncerange;
 #ifdef USE_GRIDSEED
 extern char *opt_gridseed_options;
 extern char *opt_gridseed_freq;
-extern bool opt_gridseed_proxy;
+extern char *opt_gridseed_override;
 #endif
 extern int swork_id;
 
