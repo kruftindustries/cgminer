@@ -1247,13 +1247,13 @@ static struct opt_table opt_config_table[] = {
 #ifdef USE_GRIDSEED
 	OPT_WITH_ARG("--gridseed-options",
 			opt_set_charp, NULL, &opt_gridseed_options,
-			opt_hidden),
+			"Set gridseed options: freq=N[,voltage=1][,led_off=1]"),
 	OPT_WITH_ARG("--gridseed-freq",
 			opt_set_charp, NULL, &opt_gridseed_freq,
-			opt_hidden),
+			"Set gridseed frequency per-device: serial=freq[,...]"),
 	OPT_WITH_ARG("--gridseed-override",
 			opt_set_charp, NULL, &opt_gridseed_override,
-			opt_hidden),
+			"Set any gridseed option per-device: serial:opt1=val1[,...][;serial=...]"),
 #endif
 #ifdef USE_HASHFAST
 	OPT_WITHOUT_ARG("--hfa-dfu-boot",
