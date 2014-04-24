@@ -1858,13 +1858,13 @@ static void gridseed_get_statline_before(char *buf, size_t siz, struct cgpu_info
 	//tailsprintf(buf, siz, "%s %4d MHz", info->serial, info->freq);
 	tailsprintf(buf, siz, "%4d MHz  ", info->freq);
 	if (info->mode == MODE_SHA256)
-		tailsprintf(buf, siz, "SHA256 ");
+		tailsprintf(buf, siz, "SHA256");
 	else if (info->mode == MODE_SHA256_DUAL)
-		tailsprintf(buf, siz, "DUAL / SHA256 ");
+		tailsprintf(buf, siz, "DUAL / SHA256");
 	else if (info->mode == MODE_SCRYPT)
-		tailsprintf(buf, siz, "SCRYPT ");
+		tailsprintf(buf, siz, "SCRYPT");
 	else if (info->mode == MODE_SCRYPT_DUAL)
-		tailsprintf(buf, siz, "DUAL / SCRYPT ");
+		tailsprintf(buf, siz, "DUAL / SCRYPT");
 }
 
 static void gridseed_get_statline(char *buf, size_t siz, struct cgpu_info *gridseed) {

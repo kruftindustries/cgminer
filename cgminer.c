@@ -2614,8 +2614,8 @@ const char blanks[] = "                                        ";
 
 static void curses_print_devstatus(struct cgpu_info *cgpu, int devno, int count)
 {
-	static int devno_width = 1, dawidth = 1, drwidth = 1, hwwidth = 1, wuwidth = 1;
-	char logline[256], unique_id[12];
+	static int devno_width = 1, uid_width = 4, dawidth = 1, drwidth = 1, hwwidth = 1, wuwidth = 1;
+	char logline[256], unique_id[16];
 	struct timeval now;
 	double dev_runtime, wu;
 	unsigned int devstatlen;
@@ -2645,13 +2645,23 @@ static void curses_print_devstatus(struct cgpu_info *cgpu, int devno, int count)
 	wmove(statuswin,devcursor + count, 0);
 	adj_width(devno, &devno_width);
 	if (cgpu->unique_id) {
-		unique_id[8] = '\0';
-		memcpy(unique_id, blanks, 8);
-		strncpy(unique_id, cgpu->unique_id, 8);
-	} else
-		sprintf(unique_id, "%-8d", cgpu->device_id);
-	cg_wprintw(statuswin, " %*d: %s %-8s: ", devno_width, devno, cgpu->drv->name,
-		   unique_id);
+		if (uid_width < 12 && (int)strlen(cgpu->unique_id) > uid_width)
+			uid_width = MIN(strlen(cgpu->unique_id), 12);	// maximum length 12
+
+		unique_id[4] = '\0';
+		memcpy(unique_id, blanks, 4);				// minimum length 4
+		strncpy(unique_id, cgpu->unique_id, uid_width);
+		unique_id[uid_width] = '\0';
+	} else {
+		adj_width(cgpu->device_id, &uid_width);
+		if (uid_width < 4)
+			uid_width = 4;
+		if (uid_width > 12)
+			uid_width = 12;
+		sprintf(unique_id, "%-*d", uid_width, cgpu->device_id);
+	}
+	cg_wprintw(statuswin, " %*d: %s %-*s: ", devno_width, devno, cgpu->drv->name,
+		   uid_width, unique_id);
 	logline[0] = '\0';
 	cgpu->drv->get_statline_before(logline, sizeof(logline), cgpu);
 	devstatlen = strlen(logline);
