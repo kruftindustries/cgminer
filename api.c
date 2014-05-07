@@ -152,6 +152,7 @@ static const char *TRUESTR = "true";
 static const char *FALSESTR = "false";
 
 static const char *SHA256STR = "sha256";
+static const char *SCRYPTSTR = "scrypt";
 
 static const char *DEVICECODE = ""
 #ifdef USE_ANT_S1
@@ -3432,7 +3433,10 @@ static void minecoin(struct io_data *io_data, __maybe_unused SOCKETTYPE c, __may
 	message(io_data, MSG_MINECOIN, 0, NULL, isjson);
 	io_open = io_add(io_data, isjson ? COMSTR JSON_MINECOIN : _MINECOIN COMSTR);
 
-	root = api_add_const(root, "Hash Method", SHA256STR, false);
+	if (opt_scrypt)
+		root = api_add_const(root, "Hash Method", SCRYPTSTR, false);
+	else
+		root = api_add_const(root, "Hash Method", SHA256STR, false);
 
 	cg_rlock(&ch_lock);
 	root = api_add_timeval(root, "Current Block Time", &block_timeval, true);
