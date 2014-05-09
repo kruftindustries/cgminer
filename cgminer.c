@@ -4961,8 +4961,7 @@ void write_config(FILE *fcfg)
 			}
 
 			if (opt->type & (OPT_HASARG | OPT_PROCESSARG) &&
-			    (opt->u.arg != &opt_set_null) &&
-			    ((void *)opt->cb_arg != (void *)set_rotate)) {
+			    (opt->u.arg != &opt_set_null)) {
 				char *carg = *(char **)opt->u.arg;
 
 				if (carg)
