@@ -1764,6 +1764,8 @@ static int64_t gridseed_scanwork_sha(struct thr_info *thr)
 	GRIDSEED_INFO *info = gridseed->device_data;
 	int64_t hashs;
 
+	cgsleep_ms(100);
+
 	mutex_lock(&info->qlock);
 	hashs = info->workdone * 0xffffffffL;
 	info->workdone = 0;
