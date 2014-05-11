@@ -153,7 +153,7 @@ bool opt_loginput;
 bool opt_compact;
 const int opt_cutofftemp = 95;
 int opt_log_interval = 5;
-int opt_queue = 9999;
+int opt_queue = -1;
 static int max_queue = 1;
 int opt_scantime = -1;
 int opt_expiry = 120;
@@ -9385,6 +9385,9 @@ int main(int argc, char *argv[])
 	if (!total_devices)
 		early_quit(1, "All devices disabled, cannot mine!");
 #endif
+
+	if (opt_queue == -1)
+		opt_queue = (opt_scrypt) ? total_devices : 9999;
 
 	most_devices = total_devices;
 
