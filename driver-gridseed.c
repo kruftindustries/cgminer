@@ -440,8 +440,8 @@ static int gc3355_read(struct cgpu_info *gridseed, unsigned char *buf, int size,
 {
 	int err = 0, offset = 0, end = 0;
 
-	while ((size - offset) > 0 && likely(!gridseed->shutdown)) {
-		err = usb_read(gridseed, (char *)buf + offset, size - offset, &end, C_GETRESULTS);
+	while (offset == 0 && likely(!gridseed->shutdown)) {
+		err = usb_read_once_timeout(gridseed, (char *)buf + offset, size - offset, &end, 2000, C_GETRESULTS);
 		if (err && err != LIBUSB_ERROR_TIMEOUT)
 			break;
 		offset += end;
@@ -453,10 +453,10 @@ static int gc3355_read(struct cgpu_info *gridseed, unsigned char *buf, int size,
 	if (!opt_quiet && opt_debug) {
 		int i;
 #ifndef WIN32
-		fprintf(stderr, "[1;31m <<< %d : [0m", size);
+		fprintf(stderr, "[1;31m <<< %d : [0m", offset);
 #else
 		set_text_color(FOREGROUND_RED);
-		fprintf(stderr, " <<< %d : ", size);
+		fprintf(stderr, " <<< %d : ", offset);
 		set_text_color(FOREGROUND_RED|FOREGROUND_GREEN|FOREGROUND_BLUE);
 #endif
 		for(i = 0; i < offset; i++) {
