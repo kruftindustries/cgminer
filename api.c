@@ -2070,9 +2070,9 @@ static void ascstatus(struct io_data *io_data, int asc, bool isjson, bool precom
                 if(cgpu->drv->drv_id == DRIVER_gridseed)
                 {
                         GRIDSEED_INFO *info = (GRIDSEED_INFO *)(cgpu->device_data);
-                        double freq = info->freq;
+
                         root = api_add_string(root, "Serial", info->serial, false);
-                        root = api_add_freq(root, "Frequency", &freq, false);
+                        root = api_add_int(root, "Frequency", &(info->freq), false);
                         root = api_add_int(root, "Baud", &(info->baud), false);
                         root = api_add_int(root, "Chips", &(info->chips), false);
                         root = api_add_int(root, "BTCore", &(info->btcore), false);
