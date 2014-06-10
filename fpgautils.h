@@ -13,6 +13,8 @@
 #include <stdbool.h>
 #include <stdio.h>
 
+#include "miner.h"
+
 typedef bool(*detectone_func_t)(const char*);
 typedef int(*autoscan_func_t)();
 

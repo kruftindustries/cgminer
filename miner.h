@@ -245,7 +245,8 @@ static inline int fsync (int fd)
 	DRIVER_ADD_COMMAND(avalon2) \
 	DRIVER_ADD_COMMAND(avalon) \
 	DRIVER_ADD_COMMAND(spondoolies) \
-	DRIVER_ADD_COMMAND(gridseed)
+	DRIVER_ADD_COMMAND(gridseed) \
+	DRIVER_ADD_COMMAND(zeus)
 
 #define DRIVER_PARSE_COMMANDS(DRIVER_ADD_COMMAND) \
 	FPGA_PARSE_COMMANDS(DRIVER_ADD_COMMAND) \
@@ -1040,6 +1041,12 @@ extern bool opt_bfl_noncerange;
 extern char *opt_gridseed_options;
 extern char *opt_gridseed_freq;
 extern char *opt_gridseed_override;
+#endif
+#ifdef USE_ZEUS
+extern bool opt_zeus_debug;
+extern int opt_zeus_chips_count;
+extern int opt_zeus_chip_clk;
+extern bool opt_zeus_nocheck_golden;
 #endif
 extern int swork_id;
 

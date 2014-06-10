@@ -29,13 +29,16 @@
 #ifdef USE_GRIDSEED
 #include "driver-gridseed.h"
 #endif
+#ifdef USE_ZEUS
+#include "driver-zeus.h"
+#endif
 
 #if defined(USE_BFLSC) || defined(USE_AVALON) || defined(USE_AVALON2) || \
 	defined(USE_HASHFAST) || defined(USE_BITFURY) || defined(USE_KLONDIKE) || \
 	defined(USE_KNC) || defined(USE_BAB) || defined(USE_DRILLBIT) || \
 	defined(USE_MINION) || defined(USE_COINTERRA) || defined(USE_BITMINE_A1) || \
 	defined(USE_ANT_S1) || defined(USE_ANT_S2) || defined(USE_SPONDOOLIES) || \
-	defined(USE_GRIDSEED)
+	defined(USE_GRIDSEED) || defined(USE_ZEUS)
 #define HAVE_AN_ASIC 1
 #endif
 
@@ -210,6 +213,9 @@ static const char *DEVICECODE = ""
 #endif
 #ifdef USE_GRIDSEED
 			"GSD "
+#endif
+#ifdef USE_ZEUS
+			"ZUS "
 #endif
 
 			"";
@@ -2087,39 +2093,43 @@ static void ascstatus(struct io_data *io_data, int asc, bool isjson, bool precom
 		root = api_add_elapsed(root, "Device Elapsed", &(dev_runtime), false);
 
 #ifdef USE_GRIDSEED
-                if(cgpu->drv->drv_id == DRIVER_gridseed)
-                {
-                        GRIDSEED_INFO *info = (GRIDSEED_INFO *)(cgpu->device_data);
+		if (cgpu->drv->drv_id == DRIVER_gridseed) {
+			GRIDSEED_INFO *info = cgpu->device_data;
 
-                        root = api_add_string(root, "Serial", info->serial, false);
-                        root = api_add_int(root, "Frequency", &(info->freq), false);
-                        root = api_add_int(root, "Baud", &(info->baud), false);
-                        root = api_add_int(root, "Chips", &(info->chips), false);
-                        root = api_add_int(root, "BTCore", &(info->btcore), false);
-                        root = api_add_int(root, "Modules", &(info->modules), false);
-                        root = api_add_int(root, "Use FIFO", &(info->usefifo), false);
-                        root = api_add_int(root, "Voltage", &(info->voltage), false);
-                        root = api_add_int(root, "Per Chip Stats", &(info->per_chip_stats), false);
+			root = api_add_string(root, "Serial", info->serial, false);
+			root = api_add_int(root, "Frequency", &(info->freq), false);
+			root = api_add_int(root, "Baud", &(info->baud), false);
+			root = api_add_int(root, "Chips", &(info->chips), false);
+			root = api_add_int(root, "BTCore", &(info->btcore), false);
+			root = api_add_int(root, "Modules", &(info->modules), false);
+			root = api_add_int(root, "Use FIFO", &(info->usefifo), false);
+			root = api_add_int(root, "Voltage", &(info->voltage), false);
+			root = api_add_int(root, "Per Chip Stats", &(info->per_chip_stats), false);
 
-                        switch(info->mode)
-                        {
-                                case MODE_SHA256:
-                                        root = api_add_string(root, "Mode", MODE_SHA256_STR, false);
-                                        break;
-                                case MODE_SHA256_DUAL:
-                                        root = api_add_string(root, "Mode", MODE_SHA256_DUAL_STR, false);
-                                        break;
-                                case MODE_SCRYPT:
-                                        root = api_add_string(root, "Mode", MODE_SCRYPT_STR, false);
-                                        break;
-                                case MODE_SCRYPT_DUAL:
-                                        root = api_add_string(root, "Mode", MODE_SCRYPT_DUAL_STR, false);
-                                        break;
-                                default:
-                                        root = api_add_string(root, "Mode", MODE_UNK_STR, false);
-                                        break;
-                        }
-                }
+			switch(info->mode) {
+			case MODE_SHA256:
+				root = api_add_string(root, "Mode", MODE_SHA256_STR, false);
+				break;
+			case MODE_SHA256_DUAL:
+				root = api_add_string(root, "Mode", MODE_SHA256_DUAL_STR, false);
+				break;
+			case MODE_SCRYPT:
+				root = api_add_string(root, "Mode", MODE_SCRYPT_STR, false);
+				break;
+			case MODE_SCRYPT_DUAL:
+				root = api_add_string(root, "Mode", MODE_SCRYPT_DUAL_STR, false);
+				break;
+			default:
+				root = api_add_string(root, "Mode", MODE_UNK_STR, false);
+				break;
+			}
+		}
+#endif
+#ifdef USE_ZEUS
+		if (cgpu->drv->drv_id == DRIVER_zeus) {
+			struct ZEUS_INFO *info = cgpu->device_data;
+			// TODO: implement this
+		}
 #endif
 
 		root = print_data(io_data, root, isjson, precom);

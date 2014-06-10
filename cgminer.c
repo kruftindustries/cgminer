@@ -102,6 +102,10 @@ char *curly = ":D";
 #include "driver-gridseed.h"
 #endif
 
+#ifdef USE_ZEUS
+#include "driver-zeus.h"
+#endif
+
 #if defined(USE_BITFORCE) || defined(USE_ICARUS) || defined(USE_AVALON) || defined(USE_AVALON2) || defined(USE_MODMINER)
 #	define USE_FPGA
 #endif
@@ -255,6 +259,12 @@ static char *opt_set_hfa_fan;
 char *opt_gridseed_options = NULL;
 char *opt_gridseed_freq = NULL;
 char *opt_gridseed_override = NULL;
+#endif
+#ifdef USE_ZEUS
+bool opt_zeus_debug;
+int opt_zeus_chips_count;
+int opt_zeus_chip_clk;
+bool opt_zeus_nocheck_golden;
 #endif
 static char *opt_set_null;
 #ifdef USE_MINION
@@ -767,6 +777,11 @@ static char *set_int_1_to_10(const char *arg, int *i)
 static char __maybe_unused *set_int_0_to_4(const char *arg, int *i)
 {
 	return set_int_range(arg, i, 0, 4);
+}
+
+static char *set_int_1_to_1024(const char *arg, int *i)
+{
+        return set_int_range(arg, i, 1, 1024);
 }
 
 #ifdef USE_FPGA_SERIAL
@@ -1297,6 +1312,20 @@ static struct opt_table opt_config_table[] = {
 			opt_set_charp, NULL, &opt_gridseed_override,
 			"Set any gridseed option per-device: serial:opt1=val1[,...][;serial=...]"),
 #endif
+#ifdef USE_ZEUS
+	OPT_WITHOUT_ARG("--zeus-debug",
+			opt_set_bool, &opt_zeus_debug,
+			"Enable extra Zeus driver debugging output"),
+	OPT_WITH_ARG("--zeus-chips",
+			set_int_1_to_1024, NULL, &opt_zeus_chips_count,
+			"Number of Zeus chips per device"),
+	OPT_WITH_ARG("--zeus-clock",
+			opt_set_intval, NULL, &opt_zeus_chip_clk,
+			"Zeus chip clock speed (MHz)"),
+	OPT_WITHOUT_ARG("--zeus-nocheck-golden",
+			opt_set_bool, &opt_zeus_nocheck_golden,
+			opt_hidden),
+#endif
 #ifdef USE_HASHFAST
 	OPT_WITHOUT_ARG("--hfa-dfu-boot",
 			opt_set_bool, &opt_hfa_dfu_boot,
@@ -1747,6 +1776,9 @@ static char *opt_verusage_and_exit(const char *extra)
 #endif
 #ifdef USE_GRIDSEED
 		"GridSeed "
+#endif
+#ifdef USE_ZEUS
+		"Zeus "
 #endif
 #ifdef USE_SCRYPT
 		"scrypt "
