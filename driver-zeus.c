@@ -180,20 +180,20 @@ static int zeus_read_timeout(int fd, void *buf, size_t len, int read_count, stru
 	ssize_t ret;
 	size_t total = 0;
 	int rc = 0;
-	
+
 	while (total < len) {
 		ret = read(fd, buf + total, len);
 		if (ret < 0) {
 			applog(LOG_ERR, "zeus_read: error on read: %s", strerror(errno));
 			return -1;
 		}
-		
+
 		if (tv_firstbyte != NULL && total == 0)
 			cgtime(tv_firstbyte);
-		
+
 		if (ret == 0 && read_count > 0 && ++rc >= read_count)
 			break;
-		
+
 		applog(LOG_DEBUG, "zeus_read: read returned %d", (int)ret);
 
 		total += (size_t)ret;
@@ -314,11 +314,11 @@ static bool zeus_detect_one(const char *devpath)
 
 	if (!opt_zeus_nocheck_golden) {
 		memset(nonce_bin, 0, sizeof(nonce_bin));
-		
+
 		flush_uart(fd);
-		
+
 		hex2bin(ob_bin, golden_ob, numbytes);
-		
+
 		zeus_write(fd, ob_bin, numbytes);
 		cgtime(&tv_start);
 
@@ -353,14 +353,14 @@ static bool zeus_detect_one(const char *devpath)
 	/* We have a real Zeus miner! */
 	struct cgpu_info *zeus;
 	struct ZEUS_INFO *info;
-	
+
 	zeus = calloc(1, sizeof(struct cgpu_info));
 	if (unlikely(!zeus))
 		quit(1, "Failed to malloc struct cgpu_info");
 	info = calloc(1, sizeof(struct ZEUS_INFO));
 	if (unlikely(!info))
 		quit(1, "Failed to malloc struct ZEUS_INFO");
-	
+
 	zeus->drv = &zeus_drv;
 	zeus->device_path = strdup(devpath);
 	zeus->threads = 1;
@@ -532,7 +532,7 @@ static void *zeus_io_thread(void *data)
 	snprintf(threadname, sizeof(threadname), "Zeus/%d", zeus->device_id);
 	RenameThread(threadname);
 	applog(LOG_INFO, "Zeus: serial I/O thread running, %s", threadname);
-	
+
 	while (likely(!zeus->shutdown)) {
 		FD_ZERO(&rfds);
 		FD_SET(info->device_fd, &rfds);
@@ -580,7 +580,7 @@ static void *zeus_io_thread(void *data)
 			mutex_unlock(&info->lock);
 		}
 	}
-	
+
 	return NULL;
 }
 
@@ -598,7 +598,7 @@ static bool zeus_prepare(struct thr_info *thr)
 	struct cgpu_info *zeus = thr->cgpu;
 	struct ZEUS_INFO *info = zeus->device_data;
 	int fd;
-	
+
 	fd = zeus_open(zeus->device_path, info->baud, true);
 	if (unlikely(fd < 0)) {
 		applog(LOG_ERR, "Failed to open Zeus %s%d on %s",
@@ -610,7 +610,7 @@ static bool zeus_prepare(struct thr_info *thr)
 
 	applog(LOG_INFO, "Zeus %s%d opened on %s",
 			zeus->drv->name, zeus->device_id, zeus->device_path);
-	
+
 	info->thr = thr;
 	mutex_init(&info->lock);
 	if (pipe(info->pipefd) < 0) {
@@ -626,13 +626,13 @@ static bool zeus_thread_init(struct thr_info *thr)
 {
 	struct cgpu_info *zeus = thr->cgpu;
 	struct ZEUS_INFO *info = zeus->device_data;
-	
+
 	if (pthread_create(&info->th_io, NULL, zeus_io_thread, zeus)) {
 		applog(LOG_ERR, "%s%d: Failed to create I/O thread",
 						zeus->drv->name, zeus->device_id);
 		return false;
 	}
-	
+
 	return true;
 }
 
@@ -649,13 +649,13 @@ static int64_t zeus_scanwork(struct thr_info *thr)
 	old_scanwork_time = info->scanwork_time;
 	cgtime(&info->scanwork_time);
 	elapsed_s = tdiff(&info->scanwork_time, &old_scanwork_time);
-	
+
 	estimate_hashes = elapsed_s * info->golden_speed_per_core *
 						info->cores_per_chip * info->chips_count;
 
 	if (unlikely(estimate_hashes > 0xffffffff))
 		estimate_hashes = 0xffffffff;
-	
+
 	return estimate_hashes;
 }
 
@@ -699,14 +699,14 @@ static void zeus_shutdown(struct thr_info *thr)
 {
 	struct cgpu_info *zeus = thr->cgpu;
 	struct ZEUS_INFO *info = zeus->device_data;
-	
+
 	applog(LOG_NOTICE, "%s%d: Shutting down", zeus->drv->name, zeus->device_id);
-	
+
 	pthread_join(info->th_io, NULL);
 	mutex_destroy(&info->lock);
 	close(info->pipefd[PIPE_R]);
 	close(info->pipefd[PIPE_W]);
-	
+
 	zeus_close(info->device_fd);
 	info->device_fd = -1;
 }

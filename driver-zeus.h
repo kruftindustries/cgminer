@@ -29,28 +29,28 @@
 struct ZEUS_INFO {
 	int				device_fd;
 	char			*device_name;
-	
+
 	unsigned int	nonce_count[ZEUS_CHIP_CORES];
 	unsigned int	error_count[ZEUS_CHIP_CORES];
 	unsigned int	workdone;
-	
+
 	struct timeval	workstart;
 	struct timeval	workend;
 	struct timeval	scanwork_time;
 	uint64_t		hashes_per_ms;
-	
+
 	struct thr_info	*thr;
 	pthread_t		th_io;
 	pthread_mutex_t	lock;
 	int				pipefd[2];
-	
+
 	struct work		*current_work;
-	
+
 	uint32_t		read_count;
 	uint64_t		golden_speed_per_core; // speed pre core per sec
 
 	unsigned char	freqcode;
-	
+
 	int			check_num;
 	int			baud;
 	int			cores_per_chip;
