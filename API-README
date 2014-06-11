@@ -100,7 +100,7 @@ The STATUS section is:
    Standard long time of request in seconds
 
   Code=N
-   Each unique reply has a unigue Code (See api.c - #define MSG_NNNNNN)
+   Each unique reply has a unique Code (See api.c - #define MSG_NNNNNN)
 
   Msg=string
    Message matching the Code value N
@@ -136,7 +136,7 @@ If you request a command that can't be used due to requiring parameters,
 a command that isn't a report, or an invalid command, you'll get an 'E' STATUS
 for that one but it will still attempt to process all other commands supplied
 
-Blank/missing commands are ignore e.g. +devs++
+Blank/missing commands are ignored e.g. +devs++
 will just show 'devs' using the new layout
 
 For API version 1.10 and later:
@@ -443,6 +443,12 @@ The list of requests - a (*) means it requires privileged access - and replies:
                                AVA+BTB opt=freq val=256 to 1024 - chip frequency
                                BTB opt=millivolts val=1000 to 1400 - corevoltage
 
+ lcd           LCD            An all-in-one short status summary of the miner
+                              e.g. Elapsed,GHS av,GHS 5m,GHS 5s,Temp,
+                                   Last Share Difficulty,Last Share Time,
+                                   Best Share,Last Valid Work,Found Blocks,
+                                   Pool,User|
+
  lockstats (*) none           There is no reply section just the STATUS section
                               stating the results of the request
                               A warning reply means lock stats are not compiled
@@ -482,6 +488,10 @@ api-example.php - a php script to access the API
  You must modify the line "$socket = getsock('127.0.0.1', 4028);" at the
  beginning of "function request($cmd)" to change where it looks for cgminer
 
+api-example.rb - a Ruby script to access the API.
+ usage: ruby api-example.rb command[:parameter] [HOST [PORT]]
+This script prints the parsed cgminer API response
+
 API.java/API.class
  a java program to access the API (with source code)
   usAge is: java API command address port
@@ -502,6 +512,13 @@ miner.php - an example web page to access the API
 
 Feature Changelog for external applications using the API:
 
+
+API V3.4 (cgminer v4.3.?)
+
+Added API commands:
+ 'lcd' - An all-in-one short status summary of the miner
+
+---------
 
 API V3.3 (cgminer v4.2.0)
 

@@ -94,7 +94,7 @@ char *curly = ":D";
 #include "driver-hashfast.h"
 #endif
 
-#ifdef USE_ANT_S1
+#if defined(USE_ANT_S1) || defined(USE_ANT_S2)
 #include "driver-bitmain.h"
 #endif
 
@@ -136,8 +136,11 @@ enum benchwork {
 	BENCHWORK_NONCETIME,
 	BENCHWORK_COUNT
 };
+
+#ifdef HAVE_LIBCURL
 static char *opt_btc_address;
 static char *opt_btc_sig;
+#endif
 static char *opt_benchfile;
 static bool opt_benchfile_display;
 static FILE *benchfile_in;
@@ -237,10 +240,13 @@ char *opt_bab_options = NULL;
 #ifdef USE_BITMINE_A1
 char *opt_bitmine_a1_options = NULL;
 #endif
-#ifdef USE_ANT_S1
+#if defined(USE_ANT_S1) || defined(USE_ANT_S2)
 char *opt_bitmain_options;
 static char *opt_set_bitmain_fan;
 static char *opt_set_bitmain_freq;
+#endif
+#ifdef USE_ANT_S2
+char *opt_bitmain_dev;
 #endif
 #ifdef USE_HASHFAST
 static char *opt_set_hfa_fan;
@@ -251,6 +257,14 @@ char *opt_gridseed_freq = NULL;
 char *opt_gridseed_override = NULL;
 #endif
 static char *opt_set_null;
+#ifdef USE_MINION
+int opt_minion_chipreport;
+char *opt_minion_cores;
+char *opt_minion_freq;
+bool opt_minion_idlecount;
+bool opt_minion_overheat;
+char *opt_minion_temp;
+#endif
 
 #ifdef USE_USBUTILS
 char *opt_usb_select = NULL;
@@ -322,8 +336,8 @@ cglock_t control_lock;
 pthread_mutex_t stats_lock;
 
 int hw_errors;
-int total_accepted, total_rejected, total_diff1;
-int total_getworks, total_stale, total_discarded;
+int64_t total_accepted, total_rejected, total_diff1;
+int64_t total_getworks, total_stale, total_discarded;
 double total_diff_accepted, total_diff_rejected, total_diff_stale;
 static int staged_rollable;
 unsigned int new_blocks;
@@ -750,6 +764,11 @@ static char *set_int_1_to_10(const char *arg, int *i)
 	return set_int_range(arg, i, 1, 10);
 }
 
+static char __maybe_unused *set_int_0_to_4(const char *arg, int *i)
+{
+	return set_int_range(arg, i, 0, 4);
+}
+
 #ifdef USE_FPGA_SERIAL
 static char *opt_add_serial;
 static char *add_serial(char *arg)
@@ -1122,6 +1141,9 @@ static struct opt_table opt_config_table[] = {
 	OPT_WITH_CBARG("--avalon2-voltage",
 		     set_avalon2_voltage, NULL, &opt_set_avalon2_voltage,
 		     "Set Avalon2 core voltage, in millivolts"),
+	OPT_WITH_ARG("--avalon2-cutoff",
+		     set_int_0_to_100, opt_show_intval, &opt_avalon2_overheat,
+		     "Set Avalon2 overheat cut off temperature"),
 #endif
 #ifdef USE_BAB
 	OPT_WITH_ARG("--bab-options",
@@ -1161,7 +1183,7 @@ static struct opt_table opt_config_table[] = {
 		     opt_set_charp, NULL, &opt_bitburner_fury_options,
 		     "Override avalon-options for BitBurner Fury boards baud:miners:asic:timeout:freq"),
 #endif
-#ifdef USE_ANT_S1
+#if defined(USE_ANT_S1) || defined(USE_ANT_S2)
 	OPT_WITHOUT_ARG("--bitmain-auto",
 			opt_set_bool, &opt_bitmain_auto,
 			"Adjust bitmain overclock frequency dynamically for best hashrate"),
@@ -1184,6 +1206,23 @@ static struct opt_table opt_config_table[] = {
 		     set_int_0_to_100, opt_show_intval, &opt_bitmain_temp,
 		     "Set bitmain target temperature"),
 #endif
+#ifdef USE_ANT_S2
+	OPT_WITH_ARG("--bitmain-dev",
+		     opt_set_charp, NULL, &opt_bitmain_dev,
+		     "Set bitmain device"),
+	OPT_WITHOUT_ARG("--bitmainbeeper",
+			opt_set_bool, &opt_bitmain_beeper,
+			"Set bitmain beeper ringing"),
+	OPT_WITHOUT_ARG("--bitmain-checkall",
+			opt_set_bool, &opt_bitmain_checkall,
+			opt_hidden),
+	OPT_WITHOUT_ARG("--bitmain-checkn2diff",
+			opt_set_bool, &opt_bitmain_checkn2diff,
+			opt_hidden),
+	OPT_WITHOUT_ARG("--bitmaintempoverctrl",
+			opt_set_bool, &opt_bitmain_tempoverctrl,
+			"Set bitmain stop runing when temprerature is over 80 degree Celsius"),
+#endif
 #ifdef USE_BITMINE_A1
 	OPT_WITH_ARG("--bitmine-a1-options",
 		     opt_set_charp, NULL, &opt_bitmine_a1_options,
@@ -1193,6 +1232,9 @@ static struct opt_table opt_config_table[] = {
 	OPT_WITH_ARG("--bxf-bits",
 		     set_int_32_to_63, opt_show_intval, &opt_bxf_bits,
 		     "Set max BXF/HXF bits for overclocking"),
+	OPT_WITH_ARG("--bxf-debug",
+		     set_int_0_to_4, opt_show_intval, &opt_bxf_debug,
+		    "BXF: Debug all USB I/O, > is to the board(s), < is from the board(s)"),
 	OPT_WITH_ARG("--bxf-temp-target",
 		     set_int_0_to_200, opt_show_intval, &opt_bxf_temp_target,
 		     "Set target temperature for BXF/HXF devices"),
@@ -1325,6 +1367,26 @@ static struct opt_table opt_config_table[] = {
 	OPT_WITHOUT_ARG("--lowmem",
 			opt_set_bool, &opt_lowmem,
 			"Minimise caching of shares for low memory applications"),
+#ifdef USE_MINION
+	OPT_WITH_ARG("--minion-chipreport",
+		     set_int_0_to_100, opt_show_intval, &opt_minion_chipreport,
+		     "Seconds to report chip 5min hashrate, range 0-100 (default: 0=disabled)"),
+	OPT_WITH_ARG("--minion-freq",
+		     opt_set_charp, NULL, &opt_minion_freq,
+		     "Set minion chip frequencies in MHz, single value or comma list, range 100-1400 (default: 1000)"),
+	OPT_WITH_ARG("--minion-cores",
+		     opt_set_charp, NULL, &opt_minion_cores,
+		     opt_hidden),
+	OPT_WITHOUT_ARG("--minion-idlecount",
+		     opt_set_bool, &opt_minion_idlecount,
+		     "Report when IdleCount is >0 or changes"),
+	OPT_WITHOUT_ARG("--minion-overheat",
+		     opt_set_bool, &opt_minion_overheat,
+		     "Enable directly halting any chip when the status exceeds 100C"),
+	OPT_WITH_ARG("--minion-temp",
+		     opt_set_charp, NULL, &opt_minion_temp,
+		     "Set minion chip temperature threshold, single value or comma list, range 120-160 (default: 135C)"),
+#endif
 #if defined(unix) || defined(__APPLE__)
 	OPT_WITH_ARG("--monitor|-m",
 		     opt_set_charp, NULL, &opt_stderr_cmd,
@@ -1332,7 +1394,7 @@ static struct opt_table opt_config_table[] = {
 #endif // defined(unix)
 #ifdef USE_BITFURY
 	OPT_WITH_ARG("--nfu-bits",
-		     set_int_32_to_63, opt_show_intval, &opt_nf1_bits,
+		     set_int_32_to_63, opt_show_intval, &opt_nfu_bits,
 		     "Set nanofury bits for overclocking, range 32-63"),
 #endif
 	OPT_WITHOUT_ARG("--net-delay",
@@ -1344,6 +1406,11 @@ static struct opt_table opt_config_table[] = {
 	OPT_WITHOUT_ARG("--no-submit-stale",
 			opt_set_invbool, &opt_submit_stale,
 		        "Don't submit shares if they are detected as stale"),
+#ifdef USE_BITFURY
+	OPT_WITH_ARG("--osm-led-mode",
+		     set_int_0_to_4, opt_show_intval, &opt_osm_led_mode,
+		     "Set LED mode for OneStringMiner devices"),
+#endif
 	OPT_WITH_ARG("--pass|-p",
 		     set_pass, NULL, &opt_set_null,
 		     "Password for bitcoin JSON-RPC server"),
@@ -1627,6 +1694,9 @@ static char *opt_verusage_and_exit(const char *extra)
 #ifdef USE_ANT_S1
 		"ant.S1 "
 #endif
+#ifdef USE_ANT_S2
+		"ant.S2 "
+#endif
 #ifdef USE_AVALON
 		"avalon "
 #endif
@@ -1796,7 +1866,7 @@ void clean_work(struct work *work)
 
 /* All dynamically allocated work structs should be freed here to not leak any
  * ram from arrays allocated within the work struct */
-void free_work(struct work *work)
+void _free_work(struct work *work)
 {
 	clean_work(work);
 	free(work);
@@ -1925,7 +1995,6 @@ static void gen_gbt_work(struct pool *pool, struct work *work)
 	local_work++;
 	work->pool = pool;
 	work->gbt = true;
-	work->id = total_work_inc();
 	work->longpoll = false;
 	work->getwork_mode = GETWORK_MODE_GBT;
 	work->work_block = work_block;
@@ -2561,12 +2630,12 @@ static void curses_print_status(void)
 	wclrtoeol(statuswin);
 	if (opt_widescreen) {
 		cg_mvwprintw(statuswin, 3, 0, " A:%.0f  R:%.0f  HW:%d  WU:%.1f/m |"
-			     " ST: %d  SS: %d  NB: %d  LW: %d  GF: %d  RF: %d",
+			     " ST: %d  SS: %"PRId64"  NB: %d  LW: %d  GF: %d  RF: %d",
 			     total_diff_accepted, total_diff_rejected, hw_errors,
 			     total_diff1 / total_secs * 60,
 			     total_staged(), total_stale, new_blocks, local_work, total_go, total_ro);
 	} else if (alt_status) {
-		cg_mvwprintw(statuswin, 3, 0, " ST: %d  SS: %d  NB: %d  LW: %d  GF: %d  RF: %d",
+		cg_mvwprintw(statuswin, 3, 0, " ST: %d  SS: %"PRId64"  NB: %d  LW: %d  GF: %d  RF: %d",
 			     total_staged(), total_stale, new_blocks, local_work, total_go, total_ro);
 	} else {
 		cg_mvwprintw(statuswin, 3, 0, " A:%.0f  R:%.0f  HW:%d  WU:%.1f/m",
@@ -3487,22 +3556,22 @@ static void calc_diff(struct work *work, double known)
 	}
 }
 
+static unsigned char bench_hidiff_bins[16][160];
+static unsigned char bench_lodiff_bins[16][160];
+static unsigned char bench_target[32];
+
+/* Iterate over the lo and hi diff benchmark work items such that we find one
+ * diff 32+ share every 32 work items. */
 static void get_benchmark_work(struct work *work)
 {
-	// Use a random work block pulled from a pool
-	static uint8_t bench_block[] = { CGMINER_BENCHMARK_BLOCK };
-
-	size_t bench_size = sizeof(*work);
-	size_t work_size = sizeof(bench_block);
-	size_t min_size = (work_size < bench_size ? work_size : bench_size);
-	memset(work, 0, sizeof(*work));
-	memcpy(work, &bench_block, min_size);
+	work->work_difficulty = 32;
+	memcpy(work->target, bench_target, 32);
+	work->drv_rolllimit = 0;
 	work->mandatory = true;
 	work->pool = pools[0];
 	cgtime(&work->tv_getwork);
 	copy_time(&work->tv_getwork_reply, &work->tv_getwork);
 	work->getwork_mode = GETWORK_MODE_BENCHMARK;
-	calc_diff(work, 0);
 }
 
 static void benchfile_dspwork(struct work *work, uint32_t nonce)
@@ -3838,6 +3907,13 @@ static void sighandler(int __maybe_unused sig)
 	kill_work();
 }
 
+static void _stage_work(struct work *work);
+
+#define stage_work(WORK) do { \
+	_stage_work(WORK); \
+	WORK = NULL; \
+} while (0)
+
 #ifdef HAVE_LIBCURL
 /* Called with pool_lock held. Recruit an extra curl if none are available for
  * this pool. */
@@ -4024,8 +4100,6 @@ struct work *make_clone(struct work *work)
 	return work_clone;
 }
 
-static void stage_work(struct work *work);
-
 static bool clone_available(void)
 {
 	struct work *work_clone = NULL, *work, *tmp;
@@ -4172,6 +4246,16 @@ struct work *copy_work_noffset(struct work *base_work, int noffset)
 	_copy_work(work, base_work, noffset);
 
 	return work;
+}
+
+void pool_failed(struct pool *pool)
+{
+	if (!pool_tset(pool, &pool->idle)) {
+		cgtime(&pool->tv_idle);
+		if (pool == current_pool()) {
+			switch_pools(NULL);
+		}
+	}
 }
 
 static void pool_died(struct pool *pool)
@@ -4419,7 +4503,7 @@ void switch_pools(struct pool *selected)
 
 }
 
-void discard_work(struct work *work)
+void _discard_work(struct work *work)
 {
 	if (!work->clone && !work->rolls && !work->mined) {
 		if (work->pool) {
@@ -4762,7 +4846,7 @@ static bool hash_push(struct work *work)
 	return rc;
 }
 
-static void stage_work(struct work *work)
+static void _stage_work(struct work *work)
 {
 	applog(LOG_DEBUG, "Pushing work from pool %d to hash queue", work->pool->pool_no);
 	work->work_block = work_block;
@@ -4800,9 +4884,9 @@ static void display_pool_summary(struct pool *pool)
 		if (!pool->has_stratum)
 			wlog("%s own long-poll support\n", pool->hdr_path ? "Has" : "Does not have");
 		wlog(" Queued work requests: %d\n", pool->getwork_requested);
-		wlog(" Share submissions: %d\n", pool->accepted + pool->rejected);
-		wlog(" Accepted shares: %d\n", pool->accepted);
-		wlog(" Rejected shares: %d\n", pool->rejected);
+		wlog(" Share submissions: %"PRId64"\n", pool->accepted + pool->rejected);
+		wlog(" Accepted shares: %"PRId64"\n", pool->accepted);
+		wlog(" Rejected shares: %"PRId64"\n", pool->rejected);
 		wlog(" Accepted difficulty shares: %1.f\n", pool->diff_accepted);
 		wlog(" Rejected difficulty shares: %1.f\n", pool->diff_rejected);
 		if (pool->accepted || pool->rejected)
@@ -5553,7 +5637,7 @@ retry:
 		wlogprint("Hardware Errors %d\n", cgpu->hw_errors);
 		wlogprint("Last Share Pool %d\n", cgpu->last_share_pool_time > 0 ? cgpu->last_share_pool : -1);
 		wlogprint("Total MH %.1f\n", cgpu->total_mhashes);
-		wlogprint("Diff1 Work %d\n", cgpu->diff1);
+		wlogprint("Diff1 Work %"PRId64"\n", cgpu->diff1);
 		wlogprint("Difficulty Accepted %.1f\n", cgpu->diff_accepted);
 		wlogprint("Difficulty Rejected %.1f\n", cgpu->diff_rejected);
 		wlogprint("Last Share Difficulty %.1f\n", cgpu->last_share_diff);
@@ -6134,6 +6218,7 @@ static void *stratum_rthread(void *userdata)
 			if (!restart_stratum(pool)) {
 				pool_died(pool);
 				while (!restart_stratum(pool)) {
+					pool_failed(pool);
 					if (pool->removed)
 						goto out;
 					cgsleep_ms(30000);
@@ -6174,6 +6259,7 @@ static void *stratum_rthread(void *userdata)
 
 			pool_died(pool);
 			while (!restart_stratum(pool)) {
+				pool_failed(pool);
 				if (pool->removed)
 					goto out;
 				cgsleep_ms(30000);
@@ -6627,7 +6713,7 @@ retry_stratum:
 		}
 		applog(LOG_DEBUG, "FAILED to retrieve work from pool %u %s",
 		       pool->pool_no, pool->rpc_url);
-		if (!pinging)
+		if (!pinging && !pool->idle)
 			applog(LOG_WARNING, "Pool %u slow/down or URL or credentials invalid", pool->pool_no);
 	}
 out:
@@ -6793,7 +6879,6 @@ void submit_nonce2_nonce(struct thr_info *thr, uint32_t pool_no, uint32_t nonce2
 	pool->nonce2 = nonce2;
 	gen_stratum_work(pool, work);
 
-	work->device_diff = MIN(drv->working_diff, work->work_difficulty);
 	submit_nonce(thr, work, nonce);
 	free_work(work);
 }
@@ -6867,7 +6952,6 @@ static void gen_stratum_work(struct pool *pool, struct work *work)
 	work->pool = pool;
 	work->stratum = true;
 	work->nonce = 0;
-	work->id = total_work_inc();
 	work->longpoll = false;
 	work->getwork_mode = GETWORK_MODE_STRATUM;
 	work->work_block = work_block;
@@ -7009,7 +7093,6 @@ static void gen_solo_work(struct pool *pool, struct work *work)
 	work->gbt = true;
 	work->pool = pool;
 	work->nonce = 0;
-	work->id = total_work_inc();
 	work->longpoll = false;
 	work->getwork_mode = GETWORK_MODE_SOLO;
 	work->work_block = work_block;
@@ -7028,8 +7111,23 @@ int share_work_tdiff(struct cgpu_info *cgpu)
 	return last_getwork - cgpu->last_device_valid_work;
 }
 
+static void set_benchmark_work(struct cgpu_info *cgpu, struct work *work)
+{
+	cgpu->lodiff += cgpu->direction;
+	if (cgpu->lodiff < 1)
+		cgpu->direction = 1;
+	if (cgpu->lodiff > 15) {
+		cgpu->direction = -1;
+		if (++cgpu->hidiff > 15)
+			cgpu->hidiff = 0;
+		memcpy(work, &bench_hidiff_bins[cgpu->hidiff][0], 160);
+	} else
+		memcpy(work, &bench_lodiff_bins[cgpu->lodiff][0], 160);
+}
+
 struct work *get_work(struct thr_info *thr, const int thr_id)
 {
+	struct cgpu_info *cgpu = thr->cgpu;
 	struct work *work = NULL;
 	time_t diff_t;
 
@@ -7040,7 +7138,6 @@ struct work *get_work(struct thr_info *thr, const int thr_id)
 		work = hash_pop(true);
 		if (stale_work(work, false)) {
 			discard_work(work);
-			work = NULL;
 			wake_gws();
 		}
 	}
@@ -7050,14 +7147,17 @@ struct work *get_work(struct thr_info *thr, const int thr_id)
 	 * device failures. */
 	if (diff_t > 0) {
 		applog(LOG_DEBUG, "Get work blocked for %d seconds", (int)diff_t);
-		thr->cgpu->last_device_valid_work += diff_t;
+		cgpu->last_device_valid_work += diff_t;
 	}
 	applog(LOG_DEBUG, "Got work from get queue to get work for thread %d", thr_id);
 
 	work->thr_id = thr_id;
+	if (opt_benchmark)
+		set_benchmark_work(cgpu, work);
+
 	thread_reportin(thr);
 	work->mined = true;
-	work->device_diff = MIN(thr->cgpu->drv->max_diff, work->work_difficulty);
+	work->device_diff = MIN(cgpu->drv->max_diff, work->work_difficulty);
 	return work;
 }
 
@@ -7068,6 +7168,22 @@ static void submit_work_async(struct work *work)
 	pthread_t submit_thread;
 
 	cgtime(&work->tv_work_found);
+	if (opt_benchmark) {
+		struct cgpu_info *cgpu = get_thr_cgpu(work->thr_id);
+
+		mutex_lock(&stats_lock);
+		cgpu->accepted++;
+		total_accepted++;
+		pool->accepted++;
+		cgpu->diff_accepted += work->work_difficulty;
+		total_diff_accepted += work->work_difficulty;
+		pool->diff_accepted += work->work_difficulty;
+		mutex_unlock(&stats_lock);
+
+		applog(LOG_NOTICE, "Accepted %s %d benchmark share nonce %08x",
+		       cgpu->drv->name, cgpu->device_id, *(uint32_t *)(work->data + 64 + 12));
+		return;
+	}
 
 	if (stale_work(work, true)) {
 		if (opt_submit_stale)
@@ -7218,16 +7334,18 @@ bool submit_noffset_nonce(struct thr_info *thr, struct work *work_in, uint32_t n
 
 	_copy_work(work, work_in, noffset);
 	if (!test_nonce(work, nonce)) {
+		free_work(work);
 		inc_hw_errors(thr);
 		goto out;
 	}
-	ret = true;
 	update_work_stats(thr, work);
 
 	if (opt_benchfile && opt_benchfile_display)
 		benchfile_dspwork(work, nonce);
 
+	ret = true;
 	if (!fulltest(work->hash, work->target)) {
+		free_work(work);
 		applog(LOG_INFO, "%s %d: Share above target", thr->cgpu->drv->name,
 		       thr->cgpu->device_id);
 		goto  out;
@@ -7235,8 +7353,6 @@ bool submit_noffset_nonce(struct thr_info *thr, struct work *work_in, uint32_t n
 	submit_work_async(work);
 
 out:
-	if (!ret)
-		free_work(work);
 	return ret;
 }
 
@@ -7297,7 +7413,8 @@ static void hash_sole_work(struct thr_info *mythr)
 				"mining thread %d", thr_id);
 			break;
 		}
-		work->device_diff = MIN(drv->working_diff, work->work_difficulty);
+
+		work->device_diff = MIN(drv->max_diff, work->work_difficulty);
 #ifdef USE_SCRYPT
 		/* Dynamically adjust the working diff even if the target
 		 * diff is very high to ensure we can still validate scrypt is
@@ -7482,7 +7599,6 @@ struct work *get_queued(struct cgpu_info *cgpu)
 		work = cgpu->unqueued_work;
 		if (unlikely(stale_work(work, false))) {
 			discard_work(work);
-			work = NULL;
 			wake_gws();
 		} else
 			__add_queued(cgpu, work);
@@ -7607,6 +7723,7 @@ int age_queued_work(struct cgpu_info *cgpu, double secs)
 	HASH_ITER(hh, cgpu->queued_work, work, tmp) {
 		if (tdiff(&tv_now, &work->tv_work_start) > secs) {
 			__work_completed(cgpu, work);
+			free_work(work);
 			aged++;
 		}
 	}
@@ -8191,10 +8308,10 @@ static void *watchpool_thread(void __maybe_unused *userdata)
 
 			/* Get a rolling utility per pool over 10 mins */
 			if (intervals > 19) {
-				int shares = pool->diff1 - pool->last_shares;
+				double shares = pool->diff1 - pool->last_shares;
 
 				pool->last_shares = pool->diff1;
-				pool->utility = (pool->utility + (double)shares * 0.63) / 1.63;
+				pool->utility = (pool->utility + shares * 0.63) / 1.63;
 				pool->shares = pool->utility;
 			}
 
@@ -8434,9 +8551,9 @@ void print_summary(void)
 	applog(LOG_WARNING, "Average hashrate: %.1f Mhash/s", displayed_hashes);
 	applog(LOG_WARNING, "Solved blocks: %d", found_blocks);
 	applog(LOG_WARNING, "Best share difficulty: %s", best_share);
-	applog(LOG_WARNING, "Share submissions: %d", total_accepted + total_rejected);
-	applog(LOG_WARNING, "Accepted shares: %d", total_accepted);
-	applog(LOG_WARNING, "Rejected shares: %d", total_rejected);
+	applog(LOG_WARNING, "Share submissions: %"PRId64, total_accepted + total_rejected);
+	applog(LOG_WARNING, "Accepted shares: %"PRId64, total_accepted);
+	applog(LOG_WARNING, "Rejected shares: %"PRId64, total_rejected);
 	applog(LOG_WARNING, "Accepted difficulty shares: %1.f", total_diff_accepted);
 	applog(LOG_WARNING, "Rejected difficulty shares: %1.f", total_diff_rejected);
 	if (total_accepted || total_rejected)
@@ -8445,7 +8562,7 @@ void print_summary(void)
 	applog(LOG_WARNING, "Utility (accepted shares / min): %.2f/min", utility);
 	applog(LOG_WARNING, "Work Utility (diff1 shares solved / min): %.2f/min\n", work_util);
 
-	applog(LOG_WARNING, "Stale submissions discarded due to new blocks: %d", total_stale);
+	applog(LOG_WARNING, "Stale submissions discarded due to new blocks: %"PRId64, total_stale);
 	applog(LOG_WARNING, "Unable to get work from server occasions: %d", total_go);
 	applog(LOG_WARNING, "Work items generated locally: %d", local_work);
 	applog(LOG_WARNING, "Submitting work remotely delay occasions: %d", total_ro);
@@ -8458,9 +8575,9 @@ void print_summary(void)
 			applog(LOG_WARNING, "Pool: %s", pool->rpc_url);
 			if (pool->solved)
 				applog(LOG_WARNING, "SOLVED %d BLOCK%s!", pool->solved, pool->solved > 1 ? "S" : "");
-			applog(LOG_WARNING, " Share submissions: %d", pool->accepted + pool->rejected);
-			applog(LOG_WARNING, " Accepted shares: %d", pool->accepted);
-			applog(LOG_WARNING, " Rejected shares: %d", pool->rejected);
+			applog(LOG_WARNING, " Share submissions: %"PRId64, pool->accepted + pool->rejected);
+			applog(LOG_WARNING, " Accepted shares: %"PRId64, pool->accepted);
+			applog(LOG_WARNING, " Rejected shares: %"PRId64, pool->rejected);
 			applog(LOG_WARNING, " Accepted difficulty shares: %1.f", pool->diff_accepted);
 			applog(LOG_WARNING, " Rejected difficulty shares: %1.f", pool->diff_rejected);
 			if (pool->accepted || pool->rejected)
@@ -8581,6 +8698,7 @@ static void *test_pool_thread(void *arg)
 {
 	struct pool *pool = (struct pool *)arg;
 
+retry:
 	if (pool_active(pool, false)) {
 		pool_tset(pool, &pool->lagging);
 		pool_tclear(pool, &pool->idle);
@@ -8600,8 +8718,11 @@ static void *test_pool_thread(void *arg)
 
 		pool_resus(pool);
 		switch_pools(NULL);
-	} else
+	} else {
 		pool_died(pool);
+		sleep(5);
+		goto retry;
+	}
 
 	return NULL;
 }
@@ -8900,8 +9021,6 @@ void fill_device_drv(struct device_drv *drv)
 		drv->zero_stats = &noop_zero_stats;
 	if (!drv->max_diff)
 		drv->max_diff = 1;
-	if (!drv->working_diff)
-		drv->working_diff = 1;
 }
 
 void null_device_drv(struct device_drv *drv)
@@ -8937,7 +9056,6 @@ void null_device_drv(struct device_drv *drv)
 
 	drv->zero_stats = &noop_zero_stats;
 	drv->max_diff = 1;
-	drv->working_diff = 1;
 }
 
 void enable_device(struct cgpu_info *cgpu)
@@ -8998,6 +9116,11 @@ bool add_cgpu(struct cgpu_info *cgpu)
 		devices[total_devices++] = cgpu;
 
 	adjust_mostdevs();
+#ifdef USE_USBUTILS
+	if (cgpu->usbdev && !cgpu->unique_id && cgpu->usbdev->serial_string &&
+	    strlen(cgpu->usbdev->serial_string) > 4)
+		cgpu->unique_id = str_text(cgpu->usbdev->serial_string);
+#endif
 	return true;
 }
 
@@ -9081,7 +9204,9 @@ static void hotplug_process(void)
 	wr_unlock(&mining_thr_lock);
 
 	adjust_mostdevs();
+#ifdef HAVE_CURSES
 	switch_logsize(true);
+#endif
 }
 
 #define DRIVER_DRV_DETECT_HOTPLUG(X) X##_drv.drv_detect(true);
@@ -9177,6 +9302,7 @@ static void initialise_usb(void) {
 int main(int argc, char *argv[])
 {
 	struct sigaction handler;
+	struct work *work = NULL;
 	bool pool_msg = false;
 	struct thr_info *thr;
 	struct block *block;
@@ -9296,6 +9422,12 @@ int main(int argc, char *argv[])
 		enable_pool(pool);
 		pool->idle = false;
 		successful_connect = true;
+
+		for (i = 0; i < 16; i++) {
+			hex2bin(&bench_hidiff_bins[i][0], &bench_hidiffs[i][0], 160);
+			hex2bin(&bench_lodiff_bins[i][0], &bench_lodiffs[i][0], 160);
+		}
+		set_target(bench_target, 32);
 	}
 
 #ifdef HAVE_CURSES
@@ -9518,6 +9650,7 @@ int main(int argc, char *argv[])
 		if (!use_curses)
 			early_quit(0, "No servers could be used! Exiting.");
 #ifdef HAVE_CURSES
+		touchwin(logwin);
 		wrefresh(logwin);
 		halfdelay(10);
 		if (getch() != ERR)
@@ -9589,7 +9722,6 @@ begin_bench:
 		int ts, max_staged = max_queue;
 		struct pool *pool, *cp;
 		bool lagging = false;
-		struct work *work;
 
 		if (opt_work_update)
 			signal_work_update();
@@ -9634,6 +9766,8 @@ begin_bench:
 			continue;
 		}
 
+		if (work)
+			discard_work(work);
 		work = make_work();
 
 		if (lagging && !pool_tset(cp, &cp->lagging)) {
@@ -9726,6 +9860,7 @@ retry:
 			cgsleep_ms(5000);
 			push_curl_entry(ce, pool);
 			pool = select_pool(!opt_fail_only);
+			free_work(work);
 			goto retry;
 		}
 		if (ts >= max_staged)

@@ -14,7 +14,6 @@ EXTRA_DIST	= example.conf linux-usb-cgminer \
 		  API.class API.java api-example.c windows-build.txt \
 		  bitstreams/README API-README FPGA-README \
 		  bitforce-firmware-flash.c hexdump.c ASIC-README \
-		  A1-desk-board-selector.c A1-desk-board-selector-tca9535.c \
 		  01-cgminer.rules
 
 SUBDIRS		= lib compat ccan
@@ -45,6 +44,8 @@ cgminer_SOURCES	+= elist.h miner.h compat.h bench_block.h	\
 cgminer_SOURCES	+= logging.c
 
 cgminer_SOURCES	+= klist.h klist.c
+
+cgminer_SOURCES	+= noncedup.c
 
 if HAS_SCRYPT
 cgminer_SOURCES += scrypt.c scrypt.h
@@ -90,6 +91,11 @@ endif
 if HAS_BITMINE_A1
 cgminer_SOURCES += driver-SPI-bitmine-A1.c
 cgminer_SOURCES += spi-context.c spi-context.h
+cgminer_SOURCES += A1-common.h
+cgminer_SOURCES += A1-board-selector.h
+cgminer_SOURCES += A1-board-selector-CCD.c A1-board-selector-CCR.c
+cgminer_SOURCES += A1-trimpot-mcp4x.h A1-trimpot-mcp4x.c
+cgminer_SOURCES += i2c-context.c i2c-context.h
 endif
 
 if HAS_DRILLBIT
@@ -126,6 +132,10 @@ cgminer_SOURCES += driver-minion.c
 endif
 
 if HAS_ANT_S1
+cgminer_SOURCES += driver-bitmain.c driver-bitmain.h
+endif
+
+if HAS_ANT_S2
 cgminer_SOURCES += driver-bitmain.c driver-bitmain.h
 endif
 

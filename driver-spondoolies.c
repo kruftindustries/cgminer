@@ -184,7 +184,7 @@ static struct api_data *spondoolies_api_stats(struct cgpu_info *cgpu)
 	struct spond_adapter *a = cgpu->device_data;
 	struct api_data *root = NULL;
 
-	root = api_add_int(root, "Temperature rate", &a->temp_rate, false);
+	root = api_add_int(root, "ASICs total rate", &a->temp_rate, false);
 	root = api_add_int(root, "Temparature rear", &a->rear_temp, false);
 	root = api_add_int(root, "Temparature front", &a->front_temp, false);
 
@@ -223,7 +223,7 @@ static void fill_minergate_request(minergate_do_job_req* work, struct work *cg_w
 				   int ntime_offset)
 {
 	uint32_t x[64/4];
-	int wd;
+	uint64_t wd;
 
 	memset(work, 0, sizeof(minergate_do_job_req));
 	//work->
@@ -237,7 +237,7 @@ static void fill_minergate_request(minergate_do_job_req* work, struct work *cg_w
 	//work->leading_zeroes = get_leading_zeroes(cg_work->target);
 	// Is there no better way to get leading zeroes?
 	work->leading_zeroes = 30;
-	wd = (int)round(cg_work->work_difficulty);
+	wd = round(cg_work->work_difficulty);
 	while (wd) {
 		work->leading_zeroes++;
 		wd = wd >> 1;
@@ -363,7 +363,7 @@ static int64_t spond_scanhash(struct thr_info *thr)
 	}
 
 	if (a->parse_resp) {
-		int array_size, i;
+		int array_size, i, j;
 
 		mutex_lock(&a->lock);
 		ghashes = (a->mp_last_rsp->gh_div_10_rate);
@@ -379,15 +379,18 @@ static int64_t spond_scanhash(struct thr_info *thr)
 					assert(a->my_jobs[job_id].state == SPONDWORK_STATE_IN_BUSY);
 					a->works_in_minergate_and_pending_tx--;
 					a->works_in_driver--;
-					if (work->winner_nonce) {
-						struct work *cg_work = a->my_jobs[job_id].cgminer_work;
-
+					for (j = 0; j < 2; j++) {
+						if (work->winner_nonce[j]) {
+							bool __maybe_unused ok;
+							struct work *cg_work = a->my_jobs[job_id].cgminer_work;
 #ifndef SP_NTIME
-						submit_nonce(cg_work->thr, cg_work, work->winner_nonce);
+							ok = submit_nonce(cg_work->thr, cg_work, work->winner_nonce[j]);
 #else
-						submit_noffset_nonce(cg_work->thr, cg_work, work->winner_nonce, work->ntime_offset);
+							ok = submit_noffset_nonce(cg_work->thr, cg_work, work->winner_nonce[j], work->ntime_offset);
 #endif
-						a->wins++;
+							//printf("OK on %d:%d = %d\n",work->work_id_in_sw,j, ok);
+							a->wins++;
+						}
 					}
 					//printf("%d ntime_clones = %d\n",job_id,a->my_jobs[job_id].ntime_clones);
 					if ((--a->my_jobs[job_id].ntime_clones) == 0) {
@@ -430,6 +433,7 @@ struct device_drv spondoolies_drv = {
 	.drv_id = DRIVER_spondoolies,
 	.dname = "Spondoolies",
 	.name = "SPN",
+	.max_diff = 64.0, // Limit max diff to get some nonces back regardless
 	.drv_detect = spondoolies_detect,
 	.get_api_stats = spondoolies_api_stats,
 	.thread_prepare = spondoolies_prepare,
