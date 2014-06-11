@@ -47,23 +47,8 @@ static int opt_zeus_chips_count_max = 1;// smallest power of 2 >= opt_zeus_chips
 										// is currently auto-calculated, cannot be
 										// specified on command line
 
-// Looking for options in --zeus-timing and --zeus-options:
-//
-// Code increments this each time we start to look at a device
-// However, this means that if other devices are checked by
-// the Icarus code (e.g. BFL) they will count in the option offset
-//
-// This, however, is deterministic so that's OK
-//
-// If we were to increment after successfully finding an Icarus
-// that would be random since an Icarus may fail and thus we'd
-// not be able to predict the option order
-//
-// This also assumes that serial_detect() checks them sequentially
-// and in the order specified on the command line
-//
-static int option_offset = -1;
-
+// Index for device-specific options
+//static int option_offset = -1;
 
 /************************************************************
  * Utility Functions
@@ -217,24 +202,32 @@ static int zeus_read_timeout(int fd, void *buf, size_t len, int read_count, stru
  * Detection and setup
  ************************************************************/
 
+static uint32_t zeus_clk_to_freqcode(int clkfreq)
+{
+	if (clkfreq > ZEUS_CLK_MAX) {
+		applog(LOG_WARNING, "Clock frequency %d too high, resetting to %d",
+								clkfreq, ZEUS_CLK_MAX);
+		clkfreq = ZEUS_CLK_MAX;
+	}
+
+	if (clkfreq < ZEUS_CLK_MIN) {
+		applog(LOG_WARNING, "Clock frequency %d too low, resetting to %d",
+								clkfreq, ZEUS_CLK_MIN);
+		clkfreq = ZEUS_CLK_MIN;
+	}
+
+	return (uint32_t)((double)clkfreq * 2. / 3.);
+}
+
 static bool zeus_detect_one(const char *devpath)
 {
-	struct timeval tv_start, tv_finish, golden_tv;
+	struct timeval tv_start, tv_finish;
 	int fd, baud, cores_per_chip, chips_count_max, chips_count;
-	int this_option_offset = ++option_offset;
-	int numbytes = ZEUS_COMMAND_PKT_LEN;
-	uint32_t clk_reg;
-	uint32_t clk_reg_init;
+	//int this_option_offset = ++option_offset;
+	uint32_t clk_reg, clk_reg_init, nonce;
 	uint64_t golden_speed_per_core;
-
 	char clk_header_str[10];
-
-	if (opt_zeus_chip_clk > ZEUS_CLK_MAX)
-		opt_zeus_chip_clk = ZEUS_CLK_MAX;
-	else if (opt_zeus_chip_clk < ZEUS_CLK_MIN)
-		opt_zeus_chip_clk = ZEUS_CLK_MIN;
-
-	clk_reg = (uint32_t)(opt_zeus_chip_clk * 2./3.);
+	double golden_elapsed_s;
 
 	char golden_ob[] =
 			"55aa0001"
@@ -245,16 +238,17 @@ static bool zeus_detect_one(const char *devpath)
 			"c00278894532091be6f16a5381ad33619dacb9e6a4a6e79956aac97b51112bfb93dc450b8fc765181a344b6244d42d78625f5c39463bbfdc10405ff711dc1222dd065b015ac9c2c66e28da7202000000";
 
 	const char golden_nonce[] = "00038d26";
-	const uint32_t golden_nonce_val = 0x00038d26; // 0xd26 = 3366
+	uint32_t golden_nonce_val = htole32(0x00038d26);// 0xd26= 3366
 
 	unsigned char ob_bin[ZEUS_COMMAND_PKT_LEN], nonce_bin[ZEUS_EVENT_PKT_LEN];
-	char *nonce_hex;
 
-	baud = ZEUS_IO_SPEED;				// baud rate is fixed
+	clk_reg = zeus_clk_to_freqcode(opt_zeus_chip_clk);
+
+	baud = ZEUS_IO_SPEED;					// baud rate is fixed
 	cores_per_chip = ZEUS_CHIP_CORES;		// cores/chip also fixed
-	chips_count = opt_zeus_chips_count;	// number of chips per ASIC device
-	if (chips_count > opt_zeus_chips_count_max)				// find smallest power of
-		opt_zeus_chips_count_max = lowest_pow2(chips_count);// 2 >= chips_count
+	chips_count = opt_zeus_chips_count;		// number of chips per ASIC device
+	if (chips_count > opt_zeus_chips_count_max)
+		opt_zeus_chips_count_max = lowest_pow2(chips_count);
 	chips_count_max = opt_zeus_chips_count_max;
 
 	applog(LOG_INFO, "Zeus Detect: Attempting to open %s", devpath);
@@ -270,9 +264,9 @@ static bool zeus_detect_one(const char *devpath)
 	// from 150M step to the high or low speed. we need to add delay and resend to init chip
 
 	if (clk_reg > (150 * 2./3.))
-		clk_reg_init = 165 * 2./3.;
+		clk_reg_init = zeus_clk_to_freqcode(165);
 	else
-		clk_reg_init = 139 * 2./3.;
+		clk_reg_init = zeus_clk_to_freqcode(139);
 
 	flush_uart(fd);
 
@@ -281,14 +275,14 @@ static bool zeus_detect_one(const char *devpath)
 	sprintf(clk_header_str, "%08x", clk_header + 0x01);
 	memcpy(golden_ob2, clk_header_str, 8);
 
-	hex2bin(ob_bin, golden_ob2, numbytes);
-	zeus_write(fd, ob_bin, numbytes);
+	hex2bin(ob_bin, golden_ob2, sizeof(ob_bin));
+	zeus_write(fd, ob_bin, sizeof(ob_bin));
 	sleep(1);
 	flush_uart(fd);
-	zeus_write(fd, ob_bin, numbytes);
+	zeus_write(fd, ob_bin, sizeof(ob_bin));
 	sleep(1);
 	flush_uart(fd);
-	zeus_write(fd, ob_bin, numbytes);
+	zeus_write(fd, ob_bin, sizeof(ob_bin));
 	sleep(1);
 	flush_uart(fd);
 
@@ -297,11 +291,11 @@ static bool zeus_detect_one(const char *devpath)
 	sprintf(clk_header_str, "%08x", clk_header + 0x01);
 	memcpy(golden_ob2, clk_header_str, 8);
 
-	hex2bin(ob_bin, golden_ob2, numbytes);
-	zeus_write(fd, ob_bin, numbytes);
+	hex2bin(ob_bin, golden_ob2, sizeof(ob_bin));
+	zeus_write(fd, ob_bin, sizeof(ob_bin));
 	sleep(1);
 	flush_uart(fd);
-	zeus_write(fd, ob_bin, numbytes);
+	zeus_write(fd, ob_bin, sizeof(ob_bin));
 	sleep(1);
 	flush_uart(fd);
 
@@ -317,34 +311,33 @@ static bool zeus_detect_one(const char *devpath)
 
 		flush_uart(fd);
 
-		hex2bin(ob_bin, golden_ob, numbytes);
+		hex2bin(ob_bin, golden_ob, sizeof(ob_bin));
 
-		zeus_write(fd, ob_bin, numbytes);
+		zeus_write(fd, ob_bin, sizeof(ob_bin));
 		cgtime(&tv_start);
 
 		zeus_read_timeout(fd, nonce_bin, sizeof(nonce_bin), 1000, &tv_finish);
 
 		zeus_close(fd);
 
-		nonce_hex = bin2hex(nonce_bin, sizeof(nonce_bin));
-		if (strncmp(nonce_hex, golden_nonce, 8) != 0) {
+		memcpy(&nonce, nonce_bin, sizeof(nonce_bin));
+		nonce = htole32(nonce);
+
+		if (nonce != golden_nonce_val) {
 			applog(LOG_ERR,
 					"Zeus Detect: "
-					"Test failed at %s: got %s, should be: %s",
-					devpath, nonce_hex, golden_nonce);
-			free(nonce_hex);
+					"Test failed at %s: got %08x, should be: %08x",
+					devpath, nonce, golden_nonce_val);
 			return false;
 		}
 
-		timersub(&tv_finish, &tv_start, &golden_tv);
+		golden_elapsed_s = tdiff(&tv_finish, &tv_start);
 
-		golden_speed_per_core = (uint64_t)(((double)0xd26)/((double)(golden_tv.tv_sec) + ((double)(golden_tv.tv_usec))/((double)1000000)));
+		golden_speed_per_core = (uint64_t)(((double)0xd26) / golden_elapsed_s);
 
 		if (opt_zeus_debug)
-			applog(LOG_NOTICE, "Test succeeded at %s: got %s",
-					devpath, nonce_hex);
-
-		free(nonce_hex);
+			applog(LOG_NOTICE, "Test succeeded at %s: got %08x",
+					devpath, nonce);
 	} else{
 		zeus_close(fd);
 		golden_speed_per_core = (((opt_zeus_chip_clk * 2) / 3) * 1024) / 8;
@@ -378,6 +371,15 @@ static bool zeus_detect_one(const char *devpath)
 	if (info->device_name == NULL)
 		info->device_name = zeus->device_path + strlen(zeus->device_path);
 
+	info->work_timeout.tv_sec = 4294967296L / (golden_speed_per_core * cores_per_chip * chips_count);
+	info->work_timeout.tv_usec = ((4294967296L * 1000000L) / (golden_speed_per_core * cores_per_chip * chips_count)) % 1000000L;
+
+	info->read_count = (uint32_t)((4294967296*10)/(cores_per_chip*chips_count_max*golden_speed_per_core*2));
+	info->read_count = info->read_count*3/4;
+	info->golden_speed_per_core = golden_speed_per_core;
+
+	info->freqcode = (unsigned char)(clk_reg & 0xff);
+
 	info->check_num = 0x1234;
 	info->baud = baud;
 	info->cores_per_chip = cores_per_chip;
@@ -385,16 +387,9 @@ static bool zeus_detect_one(const char *devpath)
 	info->chips_count_max= chips_count_max;
 	if ((chips_count_max & (chips_count_max - 1)) != 0)
 		quit(1, "chips_count_max must be a power of 2");
-	info->chips_bit_num = log_2(chips_count_max);
-	info->golden_speed_per_core = golden_speed_per_core;
-
-	info->freqcode = (unsigned char)(clk_reg & 0xff);
-
-	info->read_count = (uint32_t)((4294967296*10)/(cores_per_chip*chips_count_max*golden_speed_per_core*2));
-	info->read_count = info->read_count*3/4;
-
 	info->chip_clk=opt_zeus_chip_clk;
 	info->clk_header=clk_header;
+	info->chips_bit_num = log_2(chips_count_max);
 
 	//suffix_string(golden_speed_per_core, info->core_hash, sizeof(info->core_hash), 0);
 	//suffix_string(golden_speed_per_core*cores_per_chip, info->chip_hash, sizeof(info->chip_hash), 0);
@@ -415,14 +410,19 @@ static bool zeus_detect_one(const char *devpath)
  * Host <-> ASIC protocol implementation
  ************************************************************/
 
-static void zeus_purge_work(struct cgpu_info *zeus)
+static inline void __zeus_purge_work(struct ZEUS_INFO *info)
 {
-	struct ZEUS_INFO *info = zeus->device_data;
-	mutex_lock(&info->lock);
 	if (info->current_work != NULL) {
 		free_work(info->current_work);
 		info->current_work = NULL;
 	}
+}
+
+static void zeus_purge_work(struct cgpu_info *zeus)
+{
+	struct ZEUS_INFO *info = zeus->device_data;
+	mutex_lock(&info->lock);
+	__zeus_purge_work(info);
 	mutex_unlock(&info->lock);
 }
 
@@ -430,9 +430,8 @@ static bool zeus_read_response(struct cgpu_info *zeus)
 {
 	struct ZEUS_INFO *info = zeus->device_data;
 	unsigned char evtpkt[ZEUS_EVENT_PKT_LEN];
-	struct timeval elapsed;
-	int ret;
-	uint32_t nonce, chip, core;
+	int ret, chip, core;
+	uint32_t nonce;
 	bool valid;
 
 	ret = zeus_read(info->device_fd, evtpkt, sizeof(evtpkt));
@@ -440,22 +439,19 @@ static bool zeus_read_response(struct cgpu_info *zeus)
 		return false;
 
 	memcpy(&nonce, evtpkt, sizeof(evtpkt));
-#if !defined (__BIG_ENDIAN__) && !defined(MIPSEB)
-	nonce = swab32(nonce);
-#endif
+	nonce = htole32(nonce);
 
 	valid = submit_nonce(info->thr, info->current_work, nonce);
 
-	chip = chip_index(nonce, info->chips_bit_num);
-	core = (nonce & 0xe0000000) >> 29;	// core indicated by 3 highest bits
-
 	++info->workdone;
-	// TODO: calculate hashes_per_ms
-	// TODO: purge work
+	__zeus_purge_work(info);
 
-	++info->nonce_count[chip];
+	chip = (int)chip_index(nonce, info->chips_bit_num);
+	core = (int)(nonce & 0xe0000000) >> 29;	// core indicated by 3 highest bits
+
+	++info->nonce_count[chip][core];
 	if (!valid)
-		++info->error_count[chip];
+		++info->error_count[chip][core];
 
 	return true;
 }
@@ -538,8 +534,10 @@ static void *zeus_io_thread(void *data)
 		FD_SET(info->device_fd, &rfds);
 		FD_SET(info->pipefd[PIPE_R], &rfds);
 
-		tv.tv_sec = 11;
-		tv.tv_usec = 0;
+		tv.tv_sec = info->work_timeout.tv_sec;
+		tv.tv_usec = info->work_timeout.tv_usec;
+
+		applog(LOG_INFO, "select timeout: %d.%06d", tv.tv_sec, tv.tv_usec);
 
 		retval = select(maxfd + 1, &rfds, NULL, NULL, &tv);
 		if (retval < 0) {								// error
@@ -569,8 +567,11 @@ static void *zeus_io_thread(void *data)
 			zeus_purge_work(zeus);						// abandon current work
 		}
 
+		applog(LOG_INFO, "select returned with %d", retval);
+
 		if (zeus_check_need_work(zeus)) {
 			/* send task to device */
+			applog(LOG_INFO, "Sending work");
 			mutex_lock(&info->lock);
 			if (info->current_work != NULL && !info->current_work->devflag &&
 					zeus_send_work(zeus, info->current_work)) {
@@ -659,11 +660,11 @@ static int64_t zeus_scanwork(struct thr_info *thr)
 	return estimate_hashes;
 }
 
-#define zeus_update_work zeus_flush_work
 static void zeus_flush_work(struct cgpu_info *zeus)
 {
 	zeus_purge_work(zeus);
 	notify_io_thread(zeus);
+	applog(LOG_INFO, "zeus_flush_work: Tickling I/O thread");
 }
 
 static struct api_data *zeus_api_stats(struct cgpu_info *zeus)
@@ -722,7 +723,7 @@ struct device_drv zeus_drv = {
 		.hash_work = hash_driver_work,
 		.scanwork = zeus_scanwork,
 		.flush_work = zeus_flush_work,
-		.update_work = zeus_update_work,
+		//.update_work = zeus_update_work,	// redundant, always seems to be called together with flush_work ??
 		.get_api_stats = zeus_api_stats,
 		.get_statline_before = zeus_get_statline_before,
 		.thread_shutdown = zeus_shutdown,

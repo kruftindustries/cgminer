@@ -8,6 +8,7 @@
 #define ZEUS_CHIP_GEN			1
 #define ZEUS_CHIP_GEN1_CORES	8
 #define ZEUS_CHIP_CORES			ZEUS_CHIP_GEN1_CORES
+#define ZEUS_MAX_CHIPS			1024
 
 #define ZEUS_IO_SPEED	115200
 
@@ -30,14 +31,14 @@ struct ZEUS_INFO {
 	int				device_fd;
 	char			*device_name;
 
-	unsigned int	nonce_count[ZEUS_CHIP_CORES];
-	unsigned int	error_count[ZEUS_CHIP_CORES];
+	unsigned int	nonce_count[ZEUS_MAX_CHIPS][ZEUS_CHIP_CORES];
+	unsigned int	error_count[ZEUS_MAX_CHIPS][ZEUS_CHIP_CORES];
 	unsigned int	workdone;
 
 	struct timeval	workstart;
 	struct timeval	workend;
 	struct timeval	scanwork_time;
-	uint64_t		hashes_per_ms;
+	uint64_t		hashes_per_s;
 
 	struct thr_info	*thr;
 	pthread_t		th_io;
@@ -46,8 +47,9 @@ struct ZEUS_INFO {
 
 	struct work		*current_work;
 
+	struct timeval	work_timeout;
 	uint32_t		read_count;
-	uint64_t		golden_speed_per_core; // speed pre core per sec
+	uint64_t		golden_speed_per_core; // speed per core per sec
 
 	unsigned char	freqcode;
 
