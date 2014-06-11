@@ -1,7 +1,22 @@
 cgminer-scrypt
 ==============
 
-CGMiner 4.3.0 with Scrypt and GridSeed GC3355 dual-mining support.
+CGMiner 4.3.0 with GridSeed and Zeus scrypt ASIC support.
+
+## Zeus ##
+
+	./autogen.sh
+	./configure --enable-scrypt --enable-zeus
+	make
+
+The Zeus driver needs to be configured with two runtime options: the number of
+chips per ASIC device with `--zeus-chips` and the desired clock speed in MHz
+with `--zeus-clock`. Also, since autodetection is currently not implemented,
+attached devices must be specified using `--scan-serial`. Example:
+
+	./cgminer --scrypt --scan-serial /dev/ttyUSB0 --zeus-chips 192 --zeus-clock 340
+
+## Gridseed ##
 
 	./autogen.sh
 	./configure --enable-scrypt --enable-gridseed
@@ -29,8 +44,7 @@ the original [Gridseed CGMiner][] and [dtbartle][]'s scrypt modifications.
 [Gridseed CGMiner]: <https://github.com/gridseed/usb-miner/>
 [dtbartle]: <https://github.com/dtbartle/cgminer-gc3355/>
 
-Frequency Tuning
-----------------
+### Frequency Tuning ###
 
 If `pll_r/pll_f/pll_od` are specified, freq is ignored, and calculated as follows:
 * Fin = 25
@@ -39,8 +53,7 @@ If `pll_r/pll_f/pll_od` are specified, freq is ignored, and calculated as follow
 * Fout = int(Fvco / (1 << pll_od))
 * freq = Fout
 
-Dual Mining
------------
+### Dual Mining ###
 
 When dual-mining `start_port` will set the listening proxy port of the first gridseed
 device on the SHA256 instance of cgminer, with additional miners using successive ports.
@@ -52,16 +65,14 @@ ports are in use and will attempt to connect to the first via UDP.
 
 If everything is working the same devices will appear in both cgminer windows.
 
-Voltage Modding
----------------
+### Voltage Modding ###
 
 If `voltage=1` is set the gridseed chips will be switched to an alternate voltage.
 Specifically, this flag will cause the MCU to assert the VID0 input to the voltage
 regulator. This *requires* a voltmodded miner. On a stock unit this will actually
 reduce the regulator's output voltage.
 
-More Complex Options
---------------------
+### More Complex Options ###
 
 The options can also be specified for each device individually by serial number via
 `--gridseed-freq` or `--gridseed-override` or their configuration file equivalents.
