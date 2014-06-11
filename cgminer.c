@@ -172,6 +172,7 @@ time_t last_getwork;
 #if defined(USE_USBUTILS)
 int nDevs;
 #endif
+bool opt_sha256;
 #ifdef USE_SCRYPT
 bool opt_scrypt;
 #endif
@@ -1489,6 +1490,9 @@ static struct opt_table opt_config_table[] = {
 	OPT_WITH_CBARG("--sched-stop",
 		     set_sched_stop, NULL, &opt_set_sched_stop,
 		     "Set a time of day in HH:MM to stop mining (will quit without a start time)"),
+	OPT_WITHOUT_ARG("--sha256",
+		     opt_set_bool, &opt_sha256,
+		     "Use the SHA-256 algorithm for mining"),
 #ifdef USE_SCRYPT
 	OPT_WITHOUT_ARG("--scrypt",
 		     opt_set_bool, &opt_scrypt,
@@ -9418,11 +9422,14 @@ int main(int argc, char *argv[])
 	if (!config_loaded)
 		load_default_config();
 
+	if (!opt_sha256 && !opt_scrypt)
+		early_quit(1, "Must explicitly specify mining algorithm (--sha256 or --scrypt)");
+
 	if (opt_benchmark || opt_benchfile) {
 		struct pool *pool;
 
 		if (opt_scrypt)
-			quit(1, "Cannot use benchmark mode with scrypt");
+			early_quit(1, "Cannot use benchmark mode with scrypt");
 
 		pool = add_pool();
 		pool->rpc_url = malloc(255);
