@@ -7415,25 +7415,6 @@ static void hash_sole_work(struct thr_info *mythr)
 		}
 
 		work->device_diff = MIN(drv->max_diff, work->work_difficulty);
-#ifdef USE_SCRYPT
-		/* Dynamically adjust the working diff even if the target
-		 * diff is very high to ensure we can still validate scrypt is
-		 * returning shares. */
-		if (opt_scrypt) {
-			double wu;
-
-			wu = total_diff1 / total_secs * 60;
-			if (wu > 30 && drv->working_diff < drv->max_diff &&
-			    drv->working_diff < work->work_difficulty) {
-				drv->working_diff++;
-				applog(LOG_DEBUG, "Driver %s working diff changed to %.0f",
-					drv->dname, drv->working_diff);
-				work->device_diff = MIN(drv->working_diff, work->work_difficulty);
-			} else if (drv->working_diff > work->work_difficulty)
-				drv->working_diff = work->work_difficulty;
-			set_target(work->device_target, work->device_diff);
-		}
-#endif
 
 		do {
 			cgtime(&tv_start);
