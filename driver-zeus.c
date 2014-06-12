@@ -1,7 +1,6 @@
 /*
- * Copyright 2012-2013 Andrew Smith
- * Copyright 2012 Xiangfu <xiangfu@openmobilefree.com>
  * Copyright 2013-2014 Con Kolivas <kernel@kolivas.org>
+ * Copyright 2014 Zeus Integrated Systems Limited
  * Copyright 2014 Dominik Lehner
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -61,11 +60,12 @@ static void flush_uart(int fd)
 #endif
 }
 
-static int flush_fd(int fd) {		// sadly tcflush only works with terminal fds
-	static char discard[10];		// note this function assumes fd is non-blocking
-	int ret;						// so a return of -1 means success for our purposes
+static int flush_fd(int fd)			// sadly tcflush only works with terminal fds
+{						// note this function assumes fd is non-blocking
+	static char discard[10];		// so a return of -1 means success for our purposes
+	int ret;
 	while ((ret = read(fd, discard, sizeof(discard))) > 0);
-	return ret;
+	return (ret == -1);
 }
 
 static void rev(unsigned char *s, size_t l)
@@ -108,7 +108,8 @@ static uint32_t chip_index(uint32_t value, int bit_num)
 	return newvalue;
 }
 
-int lowest_pow2(int min) {
+int lowest_pow2(int min)
+{
 	int i;
 	for (i = 1; i < 1024; i = i * 2) {
 		if (min <= i){
@@ -339,7 +340,7 @@ static bool zeus_detect_one(const char *devpath)
 		if (opt_zeus_debug)
 			applog(LOG_INFO, "Test succeeded at %s: got %08x",
 					devpath, nonce);
-	} else{
+	} else {
 		zeus_close(fd);
 		golden_speed_per_core = (((opt_zeus_chip_clk * 2) / 3) * 1024) / 8;
 	}
@@ -560,7 +561,7 @@ static void *zeus_io_thread(void *data)
 				mutex_unlock(&info->lock);
 			}
 			if (FD_ISSET(info->pipefd[PIPE_R], &rfds)) {// miner thread woke us up
-				if (flush_fd(info->pipefd[PIPE_R]) == 0) {
+				if (!flush_fd(info->pipefd[PIPE_R])) {
 					// this should never happen
 					applog(LOG_ERR, "%s%d: Inter-thread pipe closed, miner thread dead?",
 							zeus->drv->name, zeus->device_id);

@@ -1,7 +1,7 @@
 cgminer-scrypt
 ==============
 
-CGMiner 4.3.0 with GridSeed and Zeus scrypt ASIC support.
+CGMiner 4.3.5 with GridSeed and Zeus scrypt ASIC support.
 
 ## Zeus ##
 
@@ -14,7 +14,14 @@ chips per ASIC device with `--zeus-chips` and the desired clock speed in MHz
 with `--zeus-clock`. Also, since autodetection is currently not implemented,
 attached devices must be specified using `--scan-serial`. Example:
 
-	./cgminer --scrypt --scan-serial /dev/ttyUSB0 --zeus-chips 192 --zeus-clock 340
+	./cgminer --scrypt --scan-serial /dev/ttyUSB0 --zeus-chips 96 --zeus-clock 328
+
+It is currently not possible to specify different chip counts or clock rates per device.
+
+Chip count for different models:
+
+Blizzard: 6
+Cyclone: 96
 
 ## Gridseed ##
 

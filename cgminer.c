@@ -1313,20 +1313,6 @@ static struct opt_table opt_config_table[] = {
 			opt_set_charp, NULL, &opt_gridseed_override,
 			"Set any gridseed option per-device: serial:opt1=val1[,...][;serial=...]"),
 #endif
-#ifdef USE_ZEUS
-	OPT_WITHOUT_ARG("--zeus-debug",
-			opt_set_bool, &opt_zeus_debug,
-			"Enable extra Zeus driver debugging output"),
-	OPT_WITH_ARG("--zeus-chips",
-			set_int_1_to_1024, NULL, &opt_zeus_chips_count,
-			"Number of Zeus chips per device"),
-	OPT_WITH_ARG("--zeus-clock",
-			opt_set_intval, NULL, &opt_zeus_chip_clk,
-			"Zeus chip clock speed (MHz)"),
-	OPT_WITHOUT_ARG("--zeus-nocheck-golden",
-			opt_set_bool, &opt_zeus_nocheck_golden,
-			opt_hidden),
-#endif
 #ifdef USE_HASHFAST
 	OPT_WITHOUT_ARG("--hfa-dfu-boot",
 			opt_set_bool, &opt_hfa_dfu_boot,
@@ -1554,6 +1540,20 @@ static struct opt_table opt_config_table[] = {
 	OPT_WITHOUT_ARG("--worktime",
 			opt_set_bool, &opt_worktime,
 			"Display extra work time debug information"),
+#ifdef USE_ZEUS
+	OPT_WITH_ARG("--zeus-chips",
+			set_int_1_to_1024, NULL, &opt_zeus_chips_count,
+			"Number of Zeus chips per device"),
+	OPT_WITH_ARG("--zeus-clock",
+			opt_set_intval, NULL, &opt_zeus_chip_clk,
+			"Zeus chip clock speed (MHz)"),
+	OPT_WITHOUT_ARG("--zeus-debug",
+			opt_set_bool, &opt_zeus_debug,
+			"Enable extra Zeus driver debugging output in verbose mode"),
+	OPT_WITHOUT_ARG("--zeus-nocheck-golden",
+			opt_set_bool, &opt_zeus_nocheck_golden,
+			opt_hidden),
+#endif
 	OPT_ENDTABLE
 };
 
