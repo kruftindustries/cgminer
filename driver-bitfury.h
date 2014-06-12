@@ -23,13 +23,16 @@
 #define BXF_TEMP_HYSTERESIS 30
 
 extern int opt_bxf_temp_target;
-extern int opt_nf1_bits;
+extern int opt_nfu_bits;
 extern int opt_bxm_bits;
 extern int opt_bxf_bits;
+extern int opt_bxf_debug;
+extern int opt_osm_led_mode;
 
-#define NF1_PIN_LED 0
-#define NF1_PIN_SCK_OVR 5
-#define NF1_PIN_PWR_EN 6
+#define NFU_PIN_LED 0
+#define NFU_PIN_SCK_OVR 5
+#define NFU_PIN_PWR_EN 6
+#define NFU_PIN_PWR_EN0 7
 
 #define SPIBUF_SIZE 16384
 #define BITFURY_REFRESH_DELAY 100
@@ -68,9 +71,11 @@ struct bitfury_info {
 	bool valid; /* Set on first valid data being found */
 	bool failing; /* Set when an attempted restart has been sent */
 
+	int chips;
+	char product[8];
+
 	/* BF1 specific data */
 	uint8_t version;
-	char product[8];
 	uint32_t serial;
 	struct timeval tv_start;
 
@@ -86,23 +91,24 @@ struct bitfury_info {
 	int ver_major;
 	int ver_minor;
 	int hw_rev;
-	int chips;
 	uint8_t clocks; // There are two but we set them equal
 	int *filtered_hw; // Hardware errors we're told about but are filtered
 	int *job; // Completed jobs we're told about
 	int *submits; // Submitted responses
 
-	/* NF1 specific data */
+	/* NFU specific data */
 	struct mcp_settings mcp;
 	char spibuf[SPIBUF_SIZE];
 	unsigned int spibufsz;
 	int osc6_bits;
-	struct bitfury_payload payload[2];
-	unsigned oldbuf[17 * 2];
-	bool job_switched[2];
-	bool second_run[2];
-	struct work *work[2];
-	struct work *owork[2];
+
+	/* Chip sized arrays */
+	struct bitfury_payload *payload;
+	unsigned int *oldbuf; // 17 vals per chip
+	bool *job_switched;
+	bool *second_run;
+	struct work **work;
+	struct work **owork;
 
 	bool (*spi_txrx)(struct cgpu_info *, struct bitfury_info *info);
 };

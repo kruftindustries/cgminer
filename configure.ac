@@ -2,7 +2,7 @@
 ##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##
 m4_define([v_maj], [4])
 m4_define([v_min], [3])
-m4_define([v_mic], [0])
+m4_define([v_mic], [5])
 ##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##
 m4_define([v_ver], [v_maj.v_min.v_mic])
 m4_define([lt_rev], m4_eval(v_maj + v_min))
@@ -106,13 +106,6 @@ case $target in
 	;;
 esac
 
-have_cgminer_sdk=false
-if test -n "$CGMINER_SDK"; then
-	have_cgminer_sdk=true
-	CPPFLAGS="-I$CGMINER_SDK/include $CPPFLAGS"
-	LDFLAGS="-L$CGMINER_SDK/lib/$target $LDFLAGS"
-fi
-
 has_winpthread=false
 if test "x$have_win32" = xtrue; then
         has_winpthread=true
@@ -126,6 +119,17 @@ if test "x$has_winpthread" != xtrue; then
         PTHREAD_LIBS=-lpthread
 fi
 
+scrypt="no"
+
+AC_ARG_ENABLE([scrypt],
+	[AC_HELP_STRING([--enable-scrypt],[Compile support for scrypt mining (default disabled)])],
+	[scrypt=$enableval]
+	)
+if test "x$scrypt" = xyes; then
+	AC_DEFINE([USE_SCRYPT], [1], [Defined to 1 if scrypt support is wanted])
+fi
+AM_CONDITIONAL([HAS_SCRYPT], [test x$scrypt = xyes])
+
 ants1="no"
 
 AC_ARG_ENABLE([ants1],
@@ -137,16 +141,20 @@ if test "x$ants1" = xyes; then
 fi
 AM_CONDITIONAL([HAS_ANT_S1], [test x$ants1 = xyes])
 
-scrypt="no"
+ants2="no"
 
-AC_ARG_ENABLE([scrypt],
-	[AC_HELP_STRING([--enable-scrypt],[Compile support for scrypt mining (default disabled)])],
-	[scrypt=$enableval]
+AC_ARG_ENABLE([ants2],
+	[AC_HELP_STRING([--enable-ants2],[Compile support for Antminer S2 Bitmain (default disabled)])],
+	[ants2=$enableval]
 	)
-if test "x$scrypt" = xyes; then
-	AC_DEFINE([USE_SCRYPT], [1], [Defined to 1 if scrypt support is wanted])
+if test "x$ants2" = xyes; then
+	AC_DEFINE([USE_ANT_S2], [1], [Defined to 1 if Antminer S2 Bitmain support is wanted])
 fi
-AM_CONDITIONAL([HAS_SCRYPT], [test x$scrypt = xyes])
+AM_CONDITIONAL([HAS_ANT_S2], [test x$ants2 = xyes])
+
+if test "x$ants1$ants2" = xyesyes; then
+	AC_MSG_ERROR([Only one of --enable-ants1 and --enable-ants2 allowed])
+fi
 
 avalon="no"
 
@@ -366,7 +374,7 @@ else
 	])
 fi
 
-if test x$avalon$bitforce$bitfury$modminer$bflsc$icarus$hashfast$klondike$drillbit$cointerra$ants1$gridseed != xnononononononononononono; then
+if test x$avalon$bitforce$bitfury$modminer$bflsc$icarus$hashfast$klondike$drillbit$cointerra$ants1$ants2$gridseed != xnonononononononononononono; then
 	want_usbutils=true
 else
 	want_usbutils=false
@@ -558,6 +566,12 @@ else
 	echo "  Antminer.S1.Bitmain..: Disabled"
 fi
 
+if test "x$ants2" = xyes; then
+	echo "  Antminer.S2.Bitmain..: Enabled"
+else
+	echo "  Antminer.S2.Bitmain..: Disabled"
+fi
+
 if test "x$avalon" = xyes; then
 	echo "  Avalon.ASICs.........: Enabled"
 else
@@ -660,7 +674,7 @@ else
 	echo "  GridSeed.ASICs.......: Disabled"
 fi
 
-if test "x$avalon$avalon2$bab$bflsc$bitforce$bitfury$hashfast$icarus$klondike$knc$modminer$drillbit$minion$cointerra$bitmine_A1$ants1$spondoolies$gridseed" = xnononononononononononononononononono; then
+if test "x$avalon$avalon2$bab$bflsc$bitforce$bitfury$hashfast$icarus$klondike$knc$modminer$drillbit$minion$cointerra$bitmine_A1$ants1$ants2$spondoolies$gridseed" = xnonononononononononononononononononono; then
 	AC_MSG_ERROR([No mining configured in])
 fi
 
