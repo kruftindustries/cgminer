@@ -12,25 +12,22 @@
 
 #include "config.h"
 
-#include <limits.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/select.h>
-#include <dirent.h>
 #include <unistd.h>
-#include <math.h>
 #ifndef WIN32
-#include <termios.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#ifndef O_CLOEXEC
-#define O_CLOEXEC 0
-#endif
+  #include <termios.h>
+  #include <sys/stat.h>
+  #include <fcntl.h>
+  #ifndef O_CLOEXEC
+    #define O_CLOEXEC 0
+  #endif
 #else
-#include <windows.h>
-#include <io.h>
+  #include <windows.h>
+  #include <io.h>
 #endif
 
 #include "fpgautils.h"
@@ -141,10 +138,12 @@ static int zeus_write(int fd, const void *buf, size_t len)
 	size_t total = 0;
 
 #if ZEUS_PROTOCOL_DEBUG
-	char *hexstr;
-	hexstr = bin2hex(buf, len);
-	applog(LOG_DEBUG, "> %s", hexstr);
-	free(hexstr);
+	if (opt_zeus_debug) {
+		char *hexstr;
+		hexstr = bin2hex(buf, len);
+		applog(LOG_DEBUG, "> %s", hexstr);
+		free(hexstr);
+	}
 #endif
 
 	while (total < len) {
@@ -185,13 +184,15 @@ static int zeus_read_timeout(int fd, void *buf, size_t len, int read_count, stru
 	}
 
 #if ZEUS_PROTOCOL_DEBUG
-	char *hexstr;
-	if (total > 0) {
-		hexstr = bin2hex(buf, total);
-		applog(LOG_DEBUG, "< %s", hexstr);
-		free(hexstr);
-	} else {
-		applog(LOG_DEBUG, "< (no data)");
+	if (opt_zeus_debug) {
+		char *hexstr;
+		if (total > 0) {
+			hexstr = bin2hex(buf, total);
+			applog(LOG_DEBUG, "< %s", hexstr);
+			free(hexstr);
+		} else {
+			applog(LOG_DEBUG, "< (no data)");
+		}
 	}
 #endif
 
@@ -336,7 +337,7 @@ static bool zeus_detect_one(const char *devpath)
 		golden_speed_per_core = (uint64_t)(((double)0xd26) / golden_elapsed_s);
 
 		if (opt_zeus_debug)
-			applog(LOG_NOTICE, "Test succeeded at %s: got %08x",
+			applog(LOG_INFO, "Test succeeded at %s: got %08x",
 					devpath, nonce);
 	} else{
 		zeus_close(fd);
@@ -370,6 +371,8 @@ static bool zeus_detect_one(const char *devpath)
 	info->device_name = strrchr(zeus->device_path, '/');
 	if (info->device_name == NULL)
 		info->device_name = zeus->device_path + strlen(zeus->device_path);
+	else
+		++info->device_name;
 
 	info->work_timeout.tv_sec = 4294967296L / (golden_speed_per_core * cores_per_chip * chips_count);
 	info->work_timeout.tv_usec = ((4294967296L * 1000000L) / (golden_speed_per_core * cores_per_chip * chips_count)) % 1000000L;
@@ -527,7 +530,8 @@ static void *zeus_io_thread(void *data)
 
 	snprintf(threadname, sizeof(threadname), "Zeus/%d", zeus->device_id);
 	RenameThread(threadname);
-	applog(LOG_INFO, "Zeus: serial I/O thread running, %s", threadname);
+	applog(LOG_INFO, "%s%d: serial I/O thread running, %s",
+						zeus->drv->name, zeus->device_id, threadname);
 
 	while (likely(!zeus->shutdown)) {
 		FD_ZERO(&rfds);
@@ -537,7 +541,8 @@ static void *zeus_io_thread(void *data)
 		tv.tv_sec = info->work_timeout.tv_sec;
 		tv.tv_usec = info->work_timeout.tv_usec;
 
-		applog(LOG_INFO, "select timeout: %d.%06d", tv.tv_sec, tv.tv_usec);
+		if (opt_zeus_debug)
+			applog(LOG_INFO, "select timeout: %d.%06d", tv.tv_sec, tv.tv_usec);
 
 		retval = select(maxfd + 1, &rfds, NULL, NULL, &tv);
 		if (retval < 0) {								// error
@@ -567,11 +572,13 @@ static void *zeus_io_thread(void *data)
 			zeus_purge_work(zeus);						// abandon current work
 		}
 
-		applog(LOG_INFO, "select returned with %d", retval);
+		if (opt_zeus_debug)
+			applog(LOG_INFO, "select returned with %d", retval);
 
 		if (zeus_check_need_work(zeus)) {
 			/* send task to device */
-			applog(LOG_INFO, "Sending work");
+			if (opt_zeus_debug)
+				applog(LOG_INFO, "Sending work");
 			mutex_lock(&info->lock);
 			if (info->current_work != NULL && !info->current_work->devflag &&
 					zeus_send_work(zeus, info->current_work)) {
@@ -602,14 +609,14 @@ static bool zeus_prepare(struct thr_info *thr)
 
 	fd = zeus_open(zeus->device_path, info->baud, true);
 	if (unlikely(fd < 0)) {
-		applog(LOG_ERR, "Failed to open Zeus %s%d on %s",
+		applog(LOG_ERR, "Failed to open %s%d on %s",
 					zeus->drv->name, zeus->device_id, zeus->device_path);
 		return false;
 	}
 
 	info->device_fd = fd;
 
-	applog(LOG_INFO, "Zeus %s%d opened on %s",
+	applog(LOG_NOTICE, "%s%d opened on %s",
 			zeus->drv->name, zeus->device_id, zeus->device_path);
 
 	info->thr = thr;
@@ -664,7 +671,8 @@ static void zeus_flush_work(struct cgpu_info *zeus)
 {
 	zeus_purge_work(zeus);
 	notify_io_thread(zeus);
-	applog(LOG_INFO, "zeus_flush_work: Tickling I/O thread");
+	if (opt_zeus_debug)
+		applog(LOG_INFO, "zeus_flush_work: Tickling I/O thread");
 }
 
 static struct api_data *zeus_api_stats(struct cgpu_info *zeus)
@@ -693,7 +701,7 @@ static struct api_data *zeus_api_stats(struct cgpu_info *zeus)
 static void zeus_get_statline_before(char *buf, size_t bufsiz, struct cgpu_info *zeus)
 {
 	struct ZEUS_INFO *info = zeus->device_data;
-	tailsprintf(buf, bufsiz, "%s  %4d MHz  ", info->device_name, info->chip_clk);
+	tailsprintf(buf, bufsiz, "%-9s  %4d MHz  ", info->device_name, info->chip_clk);
 }
 
 static void zeus_shutdown(struct thr_info *thr)
