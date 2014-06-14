@@ -130,7 +130,8 @@ static void notify_io_thread(struct cgpu_info *zeus)
  * I/O helper functions
  ************************************************************/
 
-#define zeus_open(devpath, baud, purge) serial_open(devpath, baud, ZEUS_READ_FAULT_DECISECONDS, purge)
+#define zeus_open_detect(devpath, baud, purge) serial_open(devpath, baud, ZEUS_READ_FAULT_DECISECONDS, purge)
+#define zeus_open(devpath, baud, purge) serial_open_blocking(devpath, baud, purge)
 #define zeus_close(fd) close(fd)
 
 static int zeus_write(int fd, const void *buf, size_t len)
@@ -255,7 +256,7 @@ static bool zeus_detect_one(const char *devpath)
 
 	applog(LOG_INFO, "Zeus Detect: Attempting to open %s", devpath);
 
-	fd = zeus_open(devpath, baud, true);
+	fd = zeus_open_detect(devpath, baud, true);
 	if (unlikely(fd == -1)) {
 		applog(LOG_ERR, "Zeus Detect: Failed to open %s", devpath);
 		return false;
