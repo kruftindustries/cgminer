@@ -178,9 +178,7 @@ static int zeus_read(int fd, void *buf, size_t len, int read_count, struct timev
 
 		applog(LOG_DEBUG, "zeus_read: read returned %d", (int)ret);
 
-		if (ret == 0 && read_count > 0 && ++rc >= read_count)
-			break;
-		if (ret == 0 && read_count <= 0)
+		if (ret == 0 && ++rc >= read_count)
 			break;
 
 		total += (size_t)ret;
@@ -440,8 +438,8 @@ static bool zeus_read_response(struct cgpu_info *zeus)
 	uint32_t nonce;
 	bool valid;
 
-	ret = zeus_read(info->device_fd, evtpkt, sizeof(evtpkt), 4, NULL);
-	if (ret != ZEUS_EVENT_PKT_LEN)
+	ret = zeus_read(info->device_fd, evtpkt, sizeof(evtpkt), 1, NULL);
+	if (ret == 0)
 		return false;
 
 	memcpy(&nonce, evtpkt, sizeof(evtpkt));
@@ -559,8 +557,12 @@ static void *zeus_io_thread(void *data)
 			if (FD_ISSET(info->device_fd, &rfds)) {		// event packet
 				mutex_lock(&info->lock);
 				cgtime(&info->workend);
-				if (!zeus_read_response(zeus))
-					__zeus_purge_work(info);
+				if (!zeus_read_response(zeus)) {
+					applog(LOG_ERR, "%s%d: Device disappeared, shutting down",
+							zeus->drv->name, zeus->device_id);
+					zeus->shutdown = true;
+					break;
+				}
 				mutex_unlock(&info->lock);
 			}
 			if (FD_ISSET(info->pipefd[PIPE_R], &rfds)) {// miner thread woke us up
