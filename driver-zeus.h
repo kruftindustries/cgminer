@@ -12,11 +12,7 @@
 
 #define ZEUS_IO_SPEED	115200
 
-// Fraction of a second, USB timeout is measured in
-// i.e. 10 means 1/10 of a second
-#define TIME_FACTOR 10
-// It's 10 per second, thus value = 10/TIME_FACTOR =
-#define ZEUS_READ_FAULT_DECISECONDS 1
+#define ZEUS_READ_FAULT_DECISECONDS 2
 
 #define ZEUS_COMMAND_PKT_LEN	84
 #define ZEUS_EVENT_PKT_LEN		4

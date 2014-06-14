@@ -130,8 +130,8 @@ static void notify_io_thread(struct cgpu_info *zeus)
  * I/O helper functions
  ************************************************************/
 
-#define zeus_open_detect(devpath, baud, purge) serial_open(devpath, baud, ZEUS_READ_FAULT_DECISECONDS, purge)
-#define zeus_open(devpath, baud, purge) serial_open_blocking(devpath, baud, purge)
+#define zeus_open_detect(devpath, baud, purge) serial_open_ex(devpath, baud, ZEUS_READ_FAULT_DECISECONDS, 0, purge)
+#define zeus_open(devpath, baud, purge) serial_open_ex(devpath, baud, ZEUS_READ_FAULT_DECISECONDS, 1, purge)
 #define zeus_close(fd) close(fd)
 
 static int zeus_write(int fd, const void *buf, size_t len)
@@ -160,8 +160,7 @@ static int zeus_write(int fd, const void *buf, size_t len)
 	return total;
 }
 
-#define zeus_read(fd, buf, len) zeus_read_timeout(fd, buf, len, -1, NULL)
-static int zeus_read_timeout(int fd, void *buf, size_t len, int read_count, struct timeval *tv_firstbyte)
+static int zeus_read(int fd, void *buf, size_t len, int read_count, struct timeval *tv_firstbyte)
 {
 	ssize_t ret;
 	size_t total = 0;
@@ -177,10 +176,12 @@ static int zeus_read_timeout(int fd, void *buf, size_t len, int read_count, stru
 		if (tv_firstbyte != NULL && total == 0)
 			cgtime(tv_firstbyte);
 
+		applog(LOG_DEBUG, "zeus_read: read returned %d", (int)ret);
+
 		if (ret == 0 && read_count > 0 && ++rc >= read_count)
 			break;
-
-		applog(LOG_DEBUG, "zeus_read: read returned %d", (int)ret);
+		if (ret == 0 && read_count <= 0)
+			break;
 
 		total += (size_t)ret;
 	}
@@ -319,7 +320,7 @@ static bool zeus_detect_one(const char *devpath)
 		zeus_write(fd, ob_bin, sizeof(ob_bin));
 		cgtime(&tv_start);
 
-		zeus_read_timeout(fd, nonce_bin, sizeof(nonce_bin), 1000, &tv_finish);
+		zeus_read(fd, nonce_bin, sizeof(nonce_bin), 50, &tv_finish);
 
 		zeus_close(fd);
 
@@ -439,7 +440,7 @@ static bool zeus_read_response(struct cgpu_info *zeus)
 	uint32_t nonce;
 	bool valid;
 
-	ret = zeus_read(info->device_fd, evtpkt, sizeof(evtpkt));
+	ret = zeus_read(info->device_fd, evtpkt, sizeof(evtpkt), 4, NULL);
 	if (ret != ZEUS_EVENT_PKT_LEN)
 		return false;
 
@@ -558,7 +559,8 @@ static void *zeus_io_thread(void *data)
 			if (FD_ISSET(info->device_fd, &rfds)) {		// event packet
 				mutex_lock(&info->lock);
 				cgtime(&info->workend);
-				zeus_read_response(zeus);
+				if (!zeus_read_response(zeus))
+					__zeus_purge_work(info);
 				mutex_unlock(&info->lock);
 			}
 			if (FD_ISSET(info->pipefd[PIPE_R], &rfds)) {// miner thread woke us up
