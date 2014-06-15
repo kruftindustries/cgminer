@@ -240,7 +240,7 @@ static bool zeus_detect_one(const char *devpath)
 			"c00278894532091be6f16a5381ad33619dacb9e6a4a6e79956aac97b51112bfb93dc450b8fc765181a344b6244d42d78625f5c39463bbfdc10405ff711dc1222dd065b015ac9c2c66e28da7202000000";
 
 	const char golden_nonce[] = "00038d26";
-	uint32_t golden_nonce_val = htole32(0x00038d26);// 0xd26= 3366
+	uint32_t golden_nonce_val = be32toh(0x00038d26);// 0xd26= 3366
 
 	unsigned char ob_bin[ZEUS_COMMAND_PKT_LEN], nonce_bin[ZEUS_EVENT_PKT_LEN];
 
@@ -323,7 +323,7 @@ static bool zeus_detect_one(const char *devpath)
 		zeus_close(fd);
 
 		memcpy(&nonce, nonce_bin, sizeof(nonce_bin));
-		nonce = htole32(nonce);
+		nonce = be32toh(nonce);
 
 		if (nonce != golden_nonce_val) {
 			applog(LOG_ERR,
@@ -443,7 +443,7 @@ static bool zeus_read_response(struct cgpu_info *zeus)
 		return false;
 
 	memcpy(&nonce, evtpkt, sizeof(evtpkt));
-	nonce = htole32(nonce);
+	nonce = be32toh(nonce);
 
 	valid = submit_nonce(info->thr, info->current_work, nonce);
 
