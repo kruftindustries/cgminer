@@ -134,6 +134,39 @@ static void notify_io_thread(struct cgpu_info *zeus)
 #define zeus_open(devpath, baud, purge) serial_open_ex(devpath, baud, ZEUS_READ_FAULT_DECISECONDS, 1, purge)
 #define zeus_close(fd) close(fd)
 
+static bool zeus_reopen(struct cgpu_info *zeus)
+{
+	struct ZEUS_INFO *info = zeus->device_data;
+	int fd;
+
+	applog(LOG_DEBUG, "Closing %s%d on %s",
+		zeus->drv->name, zeus->device_id, zeus->device_path);
+
+	if (info->device_fd != -1) {
+		zeus_close(info->device_fd);
+		info->device_fd = -1;
+	}
+
+	cgsleep_ms(1000);
+
+	applog(LOG_DEBUG, "Attempting to reopen %s%d on %s",
+			zeus->drv->name, zeus->device_id, zeus->device_path);
+
+	fd = zeus_open(zeus->device_path, info->baud, true);
+	if (unlikely(fd < 0)) {
+		applog(LOG_ERR, "Failed to open %s%d on %s",
+				zeus->drv->name, zeus->device_id, zeus->device_path);
+		return false;
+	}
+
+	applog(LOG_DEBUG, "Successfully reopened %s%d on %s",
+			zeus->drv->name, zeus->device_id, zeus->device_path);
+
+	info->device_fd = fd;
+
+	return true;
+}
+
 static int zeus_write(int fd, const void *buf, size_t len)
 {
 	ssize_t ret;
@@ -240,7 +273,7 @@ static bool zeus_detect_one(const char *devpath)
 			"c00278894532091be6f16a5381ad33619dacb9e6a4a6e79956aac97b51112bfb93dc450b8fc765181a344b6244d42d78625f5c39463bbfdc10405ff711dc1222dd065b015ac9c2c66e28da7202000000";
 
 	//const char golden_nonce[] = "00038d26";
-	uint32_t golden_nonce_val = be32toh(0x00038d26);// 0xd26= 3366
+	uint32_t golden_nonce_val = be32toh(0x268d0300);// 0xd26= 3366
 
 	unsigned char ob_bin[ZEUS_COMMAND_PKT_LEN], nonce_bin[ZEUS_EVENT_PKT_LEN];
 
@@ -375,10 +408,10 @@ static bool zeus_detect_one(const char *devpath)
 	else
 		++info->device_name;
 
-	info->work_timeout.tv_sec = 4294967296L / (golden_speed_per_core * cores_per_chip * chips_count);
-	info->work_timeout.tv_usec = ((4294967296L * 1000000L) / (golden_speed_per_core * cores_per_chip * chips_count)) % 1000000L;
+	info->work_timeout.tv_sec = 4294967296LL / (golden_speed_per_core * cores_per_chip * chips_count);
+	info->work_timeout.tv_usec = ((4294967296LL * 1000000L) / (golden_speed_per_core * cores_per_chip * chips_count)) % 1000000L;
 
-	info->read_count = (uint32_t)((4294967296*10)/(cores_per_chip*chips_count_max*golden_speed_per_core*2));
+	info->read_count = (uint32_t)((4294967296LL*10)/(cores_per_chip*chips_count_max*golden_speed_per_core*2));
 	info->read_count = info->read_count*3/4;
 	info->golden_speed_per_core = golden_speed_per_core;
 
@@ -439,8 +472,15 @@ static bool zeus_read_response(struct cgpu_info *zeus)
 	bool valid;
 
 	ret = zeus_read(info->device_fd, evtpkt, sizeof(evtpkt), 1, NULL);
-	if (ret <= 0)
+	if (ret <= 0) {
+		applog(LOG_NOTICE, "%s%d: I/O error while reading response, will attempt to reopen device",
+		       zeus->drv->name, zeus->device_id);
+		__zeus_purge_work(info);
+		zeus_close(info->device_fd);
+		info->device_fd = -1;
 		return false;
+	}
+
 	flush_uart(info->device_fd);
 
 	memcpy(&nonce, evtpkt, sizeof(evtpkt));
@@ -449,7 +489,6 @@ static bool zeus_read_response(struct cgpu_info *zeus)
 	valid = submit_nonce(info->thr, info->current_work, nonce);
 
 	++info->workdone;
-	__zeus_purge_work(info);
 
 	chip = (int)chip_index(nonce, info->chips_bit_num);
 	core = (int)(nonce & 0xe0000000) >> 29;	// core indicated by 3 highest bits
@@ -513,8 +552,11 @@ static bool zeus_send_work(struct cgpu_info *zeus, struct work *work)
 
 	ret = zeus_write(info->device_fd, cmdpkt, sizeof(cmdpkt));
 	if (ret < 0) {
-		applog(LOG_ERR, "%s%d: Comms error", zeus->drv->name, zeus->device_id);
-		dev_error(zeus, REASON_DEV_COMMS_ERROR);
+		applog(LOG_NOTICE, "%s%d: I/O error while sending work, will attempt to reopen device",
+			zeus->drv->name, zeus->device_id);
+		__zeus_purge_work(info);
+		zeus_close(info->device_fd);
+		info->device_fd = -1;
 		return false;
 	}
 
@@ -527,7 +569,7 @@ static void *zeus_io_thread(void *data)
 	struct ZEUS_INFO *info = zeus->device_data;
 	char threadname[24];
 	fd_set rfds;
-	struct timeval tv;
+	struct timeval tv_now, tv_spent, tv_rem;
 	int retval, maxfd = MAX(info->device_fd, info->pipefd[PIPE_R]);
 
 	snprintf(threadname, sizeof(threadname), "Zeus/%d", zeus->device_id);
@@ -536,37 +578,61 @@ static void *zeus_io_thread(void *data)
 						zeus->drv->name, zeus->device_id, threadname);
 
 	while (likely(!zeus->shutdown)) {
+		if (info->device_fd == -1 && !zeus_reopen(zeus)) {
+			applog(LOG_ERR, "Failed to reopen %s%d on %s, shutting down",
+				zeus->drv->name, zeus->device_id, zeus->device_path);
+			zeus->shutdown = true;
+			break;
+		}
+
+		zeus_check_need_work(zeus);
+
+		mutex_lock(&info->lock);
+		if (info->current_work != NULL && !info->current_work->devflag) {
+			/* send task to device */
+			if (opt_zeus_debug)
+				applog(LOG_INFO, "Sending work");
+
+			if (!zeus_send_work(zeus, info->current_work))
+				continue;
+			info->current_work->devflag = true;
+			cgtime(&info->workstart);
+		}
+		mutex_unlock(&info->lock);
+
 		FD_ZERO(&rfds);
 		FD_SET(info->device_fd, &rfds);
 		FD_SET(info->pipefd[PIPE_R], &rfds);
+		maxfd = MAX(info->device_fd, info->pipefd[PIPE_R]);
 
-		tv.tv_sec = info->work_timeout.tv_sec;
-		tv.tv_usec = info->work_timeout.tv_usec;
+		cgtime(&tv_now);
+		timersub(&tv_now, &info->workstart, &tv_spent);
+		timersub(&info->work_timeout, &tv_spent, &tv_rem);
 
-		if (opt_zeus_debug)
-			applog(LOG_INFO, "select timeout: %d.%06d", (int)tv.tv_sec, (int)tv.tv_usec);
+		if (opt_zeus_debug) {
+			applog(LOG_DEBUG, "Workstart: %d.%06d", (int)info->workstart.tv_sec, (int)info->workstart.tv_usec);
+			applog(LOG_DEBUG, "Spent: %d.%06d", (int)tv_spent.tv_sec, (int)tv_spent.tv_usec);
+			applog(LOG_DEBUG, "select timeout: %d.%06d", (int)tv_rem.tv_sec, (int)tv_rem.tv_usec);
+		}
 
-		retval = select(maxfd + 1, &rfds, NULL, NULL, &tv);
-		if (retval < 0) {								// error
+		retval = select(maxfd + 1, &rfds, NULL, NULL, &tv_rem);
+		if (retval < 0) {					// error
 			if (errno == EINTR)
 				continue;
-			applog(LOG_ERR, "%s%d: I/O error: %s",
+			applog(LOG_NOTICE, "%s%d: I/O error: %s",
 					zeus->drv->name, zeus->device_id, strerror(errno));
-			zeus->shutdown = true;
-			break;
+			__zeus_purge_work(info);
+			zeus_close(info->device_fd);
+			info->device_fd = -1;
+			continue;
 		} else if (retval > 0) {
 			if (FD_ISSET(info->device_fd, &rfds)) {		// event packet
 				mutex_lock(&info->lock);
 				cgtime(&info->workend);
-				if (!zeus_read_response(zeus)) {
-					applog(LOG_ERR, "%s%d: Device disappeared, shutting down",
-							zeus->drv->name, zeus->device_id);
-					zeus->shutdown = true;
-					break;
-				}
+				zeus_read_response(zeus);
 				mutex_unlock(&info->lock);
 			}
-			if (FD_ISSET(info->pipefd[PIPE_R], &rfds)) {// miner thread woke us up
+			if (FD_ISSET(info->pipefd[PIPE_R], &rfds)) {	// miner thread woke us up
 				if (!flush_fd(info->pipefd[PIPE_R])) {
 					// this should never happen
 					applog(LOG_ERR, "%s%d: Inter-thread pipe closed, miner thread dead?",
@@ -575,25 +641,12 @@ static void *zeus_io_thread(void *data)
 					break;
 				}
 			}
-		} else {										// timeout
-			zeus_purge_work(zeus);						// abandon current work
+		} else {						// timeout
+			zeus_purge_work(zeus);				// abandon current work
 		}
 
 		if (opt_zeus_debug)
-			applog(LOG_INFO, "select returned with %d", retval);
-
-		if (zeus_check_need_work(zeus)) {
-			/* send task to device */
-			if (opt_zeus_debug)
-				applog(LOG_INFO, "Sending work");
-			mutex_lock(&info->lock);
-			if (info->current_work != NULL && !info->current_work->devflag &&
-					zeus_send_work(zeus, info->current_work)) {
-				info->current_work->devflag = true;
-				cgtime(&info->workstart);
-			}
-			mutex_unlock(&info->lock);
-		}
+			applog(LOG_DEBUG, "select returned with %d", retval);
 	}
 
 	return NULL;
@@ -612,8 +665,9 @@ static bool zeus_prepare(struct thr_info *thr)
 {
 	struct cgpu_info *zeus = thr->cgpu;
 	struct ZEUS_INFO *info = zeus->device_data;
-	int fd;
+	//int fd;
 
+	/*
 	fd = zeus_open(zeus->device_path, info->baud, true);
 	if (unlikely(fd < 0)) {
 		applog(LOG_ERR, "Failed to open %s%d on %s",
@@ -625,6 +679,7 @@ static bool zeus_prepare(struct thr_info *thr)
 
 	applog(LOG_NOTICE, "%s%d opened on %s",
 			zeus->drv->name, zeus->device_id, zeus->device_path);
+	*/
 
 	info->thr = thr;
 	mutex_init(&info->lock);
@@ -674,6 +729,7 @@ static int64_t zeus_scanwork(struct thr_info *thr)
 	return estimate_hashes;
 }
 
+#define zeus_update_work zeus_flush_work
 static void zeus_flush_work(struct cgpu_info *zeus)
 {
 	zeus_purge_work(zeus);
@@ -708,7 +764,7 @@ static struct api_data *zeus_api_stats(struct cgpu_info *zeus)
 static void zeus_get_statline_before(char *buf, size_t bufsiz, struct cgpu_info *zeus)
 {
 	struct ZEUS_INFO *info = zeus->device_data;
-	tailsprintf(buf, bufsiz, "%-9s  %4d MHz  ", info->device_name, info->chip_clk);
+	tailsprintf(buf, bufsiz, "%-9s  %4d MHz  ", zeus->device_path, info->chip_clk);
 }
 
 static void zeus_shutdown(struct thr_info *thr)
