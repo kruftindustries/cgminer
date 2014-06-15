@@ -239,7 +239,7 @@ static bool zeus_detect_one(const char *devpath)
 			"55aa00ff"
 			"c00278894532091be6f16a5381ad33619dacb9e6a4a6e79956aac97b51112bfb93dc450b8fc765181a344b6244d42d78625f5c39463bbfdc10405ff711dc1222dd065b015ac9c2c66e28da7202000000";
 
-	const char golden_nonce[] = "00038d26";
+	//const char golden_nonce[] = "00038d26";
 	uint32_t golden_nonce_val = be32toh(0x00038d26);// 0xd26= 3366
 
 	unsigned char ob_bin[ZEUS_COMMAND_PKT_LEN], nonce_bin[ZEUS_EVENT_PKT_LEN];
@@ -439,8 +439,9 @@ static bool zeus_read_response(struct cgpu_info *zeus)
 	bool valid;
 
 	ret = zeus_read(info->device_fd, evtpkt, sizeof(evtpkt), 1, NULL);
-	if (ret == 0)
+	if (ret <= 0)
 		return false;
+	flush_uart(info->device_fd);
 
 	memcpy(&nonce, evtpkt, sizeof(evtpkt));
 	nonce = be32toh(nonce);
@@ -492,15 +493,15 @@ static bool zeus_send_work(struct cgpu_info *zeus, struct work *work)
 {
 	struct ZEUS_INFO *info = zeus->device_data;
 	unsigned char cmdpkt[ZEUS_COMMAND_PKT_LEN];
-	int ret, diff;
-	uint16_t diff_code;
+	int ret;
+	uint32_t diff_code, diff;
 
-	diff = (int)work->device_diff;
-	if (diff < info->chips_count)
-		diff = info->chips_count;
+	diff = work->work_difficulty;
+	if (diff < 1)
+		diff = 1;
 
 	diff_code = 0xffff / diff;
-	applog(LOG_DEBUG, "zeus_send_work: diff_code=%02x", diff_code);
+	applog(LOG_DEBUG, "zeus_send_work: diff=%d diff_code=%04x", diff, diff_code);
 
 	cmdpkt[0] = info->freqcode;
 	cmdpkt[1] = ~(info->freqcode);
@@ -543,7 +544,7 @@ static void *zeus_io_thread(void *data)
 		tv.tv_usec = info->work_timeout.tv_usec;
 
 		if (opt_zeus_debug)
-			applog(LOG_INFO, "select timeout: %d.%06d", tv.tv_sec, tv.tv_usec);
+			applog(LOG_INFO, "select timeout: %d.%06d", (int)tv.tv_sec, (int)tv.tv_usec);
 
 		retval = select(maxfd + 1, &rfds, NULL, NULL, &tv);
 		if (retval < 0) {								// error
@@ -722,8 +723,10 @@ static void zeus_shutdown(struct thr_info *thr)
 	close(info->pipefd[PIPE_R]);
 	close(info->pipefd[PIPE_W]);
 
-	zeus_close(info->device_fd);
-	info->device_fd = -1;
+	if (info->device_fd != -1) {
+		zeus_close(info->device_fd);
+		info->device_fd = -1;
+	}
 }
 
 struct device_drv zeus_drv = {
