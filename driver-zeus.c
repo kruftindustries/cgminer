@@ -234,7 +234,7 @@ static int zeus_read(int fd, void *buf, size_t len, int read_count, struct timev
  * Detection and setup
  ************************************************************/
 
-static uint32_t zeus_clk_to_freqcode(int clkfreq)
+static unsigned char zeus_clk_to_freqcode(int clkfreq)
 {
 	if (clkfreq > ZEUS_CLK_MAX) {
 		applog(LOG_WARNING, "Clock frequency %d too high, resetting to %d",
@@ -248,35 +248,31 @@ static uint32_t zeus_clk_to_freqcode(int clkfreq)
 		clkfreq = ZEUS_CLK_MIN;
 	}
 
-	return (uint32_t)((double)clkfreq * 2. / 3.);
+	return (unsigned char)((double)clkfreq * 2. / 3.);
 }
 
 static bool zeus_detect_one(const char *devpath)
 {
 	struct timeval tv_start, tv_finish;
-	int fd, baud, cores_per_chip, chips_count_max, chips_count;
+	int i, fd, baud, cores_per_chip, chips_count_max, chips_count;
 	//int this_option_offset = ++option_offset;
-	uint32_t clk_reg, clk_reg_init, nonce;
+	unsigned char freqcode_init, freqcode;
+	char *tmp;
+	uint32_t nonce;
 	uint64_t golden_speed_per_core;
-	char clk_header_str[10];
-	double golden_elapsed_s;
 
-	char golden_ob[] =
+	uint32_t golden_nonce_val = be32toh(0x268d0300); // 0xd26 = 3366
+	unsigned char ob_bin[ZEUS_COMMAND_PKT_LEN], nonce_bin[ZEUS_EVENT_PKT_LEN];
+
+	static const char golden_ob[] =
 			"55aa0001"
 			"00038000063b0b1b028f32535e900609c15dc49a42b1d8492a6dd4f8f15295c989a1decf584a6aa93be26066d3185f55ef635b5865a7a79b7fa74121a6bb819da416328a9bd2f8cef72794bf02000000";
 
-	char golden_ob2[] =
+	static const char golden_ob2[] =
 			"55aa00ff"
 			"c00278894532091be6f16a5381ad33619dacb9e6a4a6e79956aac97b51112bfb93dc450b8fc765181a344b6244d42d78625f5c39463bbfdc10405ff711dc1222dd065b015ac9c2c66e28da7202000000";
 
-	//const char golden_nonce[] = "00038d26";
-	uint32_t golden_nonce_val = be32toh(0x268d0300);// 0xd26= 3366
-
-	unsigned char ob_bin[ZEUS_COMMAND_PKT_LEN], nonce_bin[ZEUS_EVENT_PKT_LEN];
-
-	clk_reg = zeus_clk_to_freqcode(opt_zeus_chip_clk);
-
-	baud = ZEUS_IO_SPEED;					// baud rate is fixed
+	baud = ZEUS_IO_SPEED;				// baud rate is fixed
 	cores_per_chip = ZEUS_CHIP_CORES;		// cores/chip also fixed
 	chips_count = opt_zeus_chips_count;		// number of chips per ASIC device
 	if (chips_count > opt_zeus_chips_count_max)
@@ -291,88 +287,70 @@ static bool zeus_detect_one(const char *devpath)
 		return false;
 	}
 
-	uint32_t clk_header;
+	freqcode = zeus_clk_to_freqcode(opt_zeus_chip_clk);
 
 	// from 150M step to the high or low speed. we need to add delay and resend to init chip
-
-	if (clk_reg > (150 * 2./3.))
-		clk_reg_init = zeus_clk_to_freqcode(165);
+	if (opt_zeus_chip_clk > 150)
+		freqcode_init = zeus_clk_to_freqcode(165);
 	else
-		clk_reg_init = zeus_clk_to_freqcode(139);
+		freqcode_init = zeus_clk_to_freqcode(139);
 
 	flush_uart(fd);
-
-
-	clk_header = (clk_reg_init << 24) + ((0xff - clk_reg_init) << 16);
-	sprintf(clk_header_str, "%08x", clk_header + 0x01);
-	memcpy(golden_ob2, clk_header_str, 8);
 
 	hex2bin(ob_bin, golden_ob2, sizeof(ob_bin));
-	zeus_write(fd, ob_bin, sizeof(ob_bin));
-	sleep(1);
-	flush_uart(fd);
-	zeus_write(fd, ob_bin, sizeof(ob_bin));
-	sleep(1);
-	flush_uart(fd);
-	zeus_write(fd, ob_bin, sizeof(ob_bin));
-	sleep(1);
-	flush_uart(fd);
-
-
-	clk_header = (clk_reg << 24) + ((0xff - clk_reg) << 16);
-	sprintf(clk_header_str, "%08x", clk_header + 0x01);
-	memcpy(golden_ob2, clk_header_str, 8);
+	ob_bin[0] = freqcode_init;
+	ob_bin[1] = ~freqcode_init;
+	ob_bin[2] = 0x00;
+	ob_bin[3] = 0x01;
+	for (i = 0; i < 2; ++i) {
+		zeus_write(fd, ob_bin, sizeof(ob_bin));
+		sleep(1);
+		flush_uart(fd);
+	}
 
 	hex2bin(ob_bin, golden_ob2, sizeof(ob_bin));
-	zeus_write(fd, ob_bin, sizeof(ob_bin));
-	sleep(1);
-	flush_uart(fd);
-	zeus_write(fd, ob_bin, sizeof(ob_bin));
-	sleep(1);
-	flush_uart(fd);
-
-
-
-	clk_header = (clk_reg << 24) + ((0xff - clk_reg) << 16);
-	sprintf(clk_header_str, "%08x", clk_header + 0x01);
-	memcpy(golden_ob, clk_header_str, 8);
-
+	ob_bin[0] = freqcode;
+	ob_bin[1] = ~freqcode;
+	ob_bin[2] = 0x00;
+	ob_bin[3] = 0x01;
+	for (i = 0; i < 2; ++i) {
+		zeus_write(fd, ob_bin, sizeof(ob_bin));
+		sleep(1);
+		flush_uart(fd);
+	}
 
 	if (!opt_zeus_nocheck_golden) {
 		memset(nonce_bin, 0, sizeof(nonce_bin));
 
-		flush_uart(fd);
-
 		hex2bin(ob_bin, golden_ob, sizeof(ob_bin));
+		ob_bin[0] = freqcode;
+		ob_bin[1] = ~freqcode;
+		ob_bin[2] = 0x00;
+		ob_bin[3] = 0x01;
 
 		zeus_write(fd, ob_bin, sizeof(ob_bin));
 		cgtime(&tv_start);
-
 		zeus_read(fd, nonce_bin, sizeof(nonce_bin), 100, &tv_finish);
-
 		zeus_close(fd);
 
 		memcpy(&nonce, nonce_bin, sizeof(nonce_bin));
 		nonce = be32toh(nonce);
 
 		if (nonce != golden_nonce_val) {
-			applog(LOG_ERR,
-					"Zeus Detect: "
+			applog(LOG_ERR, "Zeus Detect: "
 					"Test failed at %s: got %08x, should be: %08x",
 					devpath, nonce, golden_nonce_val);
 			return false;
 		}
 
-		golden_elapsed_s = tdiff(&tv_finish, &tv_start);
-
-		golden_speed_per_core = (uint64_t)(((double)0xd26) / golden_elapsed_s);
+		golden_speed_per_core = (uint64_t)((double)0xd26 / tdiff(&tv_finish, &tv_start));
 
 		if (opt_zeus_debug)
 			applog(LOG_INFO, "Test succeeded at %s: got %08x",
 					devpath, nonce);
 	} else {
 		zeus_close(fd);
-		golden_speed_per_core = (((opt_zeus_chip_clk * 2) / 3) * 1024) / 8;
+		golden_speed_per_core = (((opt_zeus_chip_clk * 2.) / 3.) * 1024.) / 8.;
 	}
 
 	/* We have a real Zeus miner! */
@@ -399,46 +377,32 @@ static bool zeus_detect_one(const char *devpath)
 			zeus->device_id, baud, cores_per_chip, chips_count);
 
 	info->device_fd = -1;
-	info->device_name = strrchr(zeus->device_path, '/');
-	if (info->device_name == NULL)
-		info->device_name = zeus->device_path + strlen(zeus->device_path);
+	tmp = strrchr(zeus->device_path, '/');
+	if (tmp == NULL)
+		strncpy(info->device_name, zeus->device_path, sizeof(info->device_name) - 1);
 	else
-		++info->device_name;
+		strncpy(info->device_name, tmp + 1, sizeof(info->device_name) - 1);
+	info->device_name[sizeof(info->device_name) - 1] = '\0';
 
 	info->work_timeout.tv_sec = 4294967296LL / (golden_speed_per_core * cores_per_chip * chips_count);
 	info->work_timeout.tv_usec = ((4294967296LL * 1000000L) / (golden_speed_per_core * cores_per_chip * chips_count)) % 1000000L;
-
+	info->golden_speed_per_core = golden_speed_per_core;
 	info->read_count = (uint32_t)((4294967296LL*10)/(cores_per_chip*chips_count_max*golden_speed_per_core*2));
 	info->read_count = info->read_count*3/4;
-	info->golden_speed_per_core = golden_speed_per_core;
 
-	info->freqcode = (unsigned char)(clk_reg & 0xff);
+	info->freqcode = freqcode;
 
-	info->check_num = 0x1234;
 	info->baud = baud;
 	info->cores_per_chip = cores_per_chip;
 	info->chips_count = chips_count;
-	info->chips_count_max= chips_count_max;
+	info->chips_count_max = chips_count_max;
 	if ((chips_count_max & (chips_count_max - 1)) != 0)
 		quit(1, "chips_count_max must be a power of 2");
-	info->chip_clk=opt_zeus_chip_clk;
-	info->clk_header=clk_header;
+	info->chip_clk = opt_zeus_chip_clk;
 	info->chips_bit_num = log_2(chips_count_max);
 
 	if (!add_cgpu(zeus))
 		quit(1, "Failed to add_cgpu");
-
-	//suffix_string(golden_speed_per_core, info->core_hash, sizeof(info->core_hash), 0);
-	//suffix_string(golden_speed_per_core*cores_per_chip, info->chip_hash, sizeof(info->chip_hash), 0);
-	//suffix_string(golden_speed_per_core*cores_per_chip*chips_count, info->board_hash, sizeof(info->board_hash), 0);
-
-	/*
-	if (opt_zeus_debug) {
-		applog(LOG_NOTICE,
-				"[Speed] %dMhz core|chip|board: [%s/s], [%s/s], [%s/s], readcount:%d,bitnum:%d ",
-				info->chip_clk,info->core_hash,info->chip_hash,info->board_hash,info->read_count,info->chips_bit_num);
-	}
-	*/
 
 	return true;
 }
@@ -447,20 +411,13 @@ static bool zeus_detect_one(const char *devpath)
  * Host <-> ASIC protocol implementation
  ************************************************************/
 
-static inline void __zeus_purge_work(struct ZEUS_INFO *info)
+static void zeus_purge_work(struct cgpu_info *zeus)
 {
+	struct ZEUS_INFO *info = zeus->device_data;
 	if (info->current_work != NULL) {
 		free_work(info->current_work);
 		info->current_work = NULL;
 	}
-}
-
-static void zeus_purge_work(struct cgpu_info *zeus)
-{
-	struct ZEUS_INFO *info = zeus->device_data;
-	mutex_lock(&info->lock);
-	__zeus_purge_work(info);
-	mutex_unlock(&info->lock);
 }
 
 static bool zeus_read_response(struct cgpu_info *zeus)
@@ -475,7 +432,7 @@ static bool zeus_read_response(struct cgpu_info *zeus)
 	if (ret <= 0) {
 		applog(LOG_NOTICE, "%s%d: I/O error while reading response, will attempt to reopen device",
 			zeus->drv->name, zeus->device_id);
-		__zeus_purge_work(info);
+		zeus_purge_work(zeus);
 		zeus_close(info->device_fd);
 		info->device_fd = -1;
 		return false;
@@ -519,10 +476,10 @@ static bool zeus_check_need_work(struct cgpu_info *zeus)
 	need_work = (info->current_work == NULL);
 
 	if (need_work) {
-		work = get_work(thr, thr->id);
+		work = get_work(thr, thr->id);  // get_work can block, so done outside mutex_lock
 
 		mutex_lock(&info->lock);
-		if (info->current_work == NULL) {
+		if (info->current_work == NULL) {  // verify still NULL
 			work->devflag = false;
 			info->current_work = work;
 		} else {
@@ -563,7 +520,7 @@ static bool zeus_send_work(struct cgpu_info *zeus, struct work *work)
 	if (ret < 0) {
 		applog(LOG_NOTICE, "%s%d: I/O error while sending work, will attempt to reopen device",
 			zeus->drv->name, zeus->device_id);
-		__zeus_purge_work(info);
+		zeus_purge_work(zeus);
 		zeus_close(info->device_fd);
 		info->device_fd = -1;
 		return false;
@@ -586,14 +543,23 @@ static void *zeus_io_thread(void *data)
 	applog(LOG_INFO, "%s%d: serial I/O thread running, %s",
 						zeus->drv->name, zeus->device_id, threadname);
 
+	// pfds[0].fd set in loop
+	pfds[0].events = POLLIN;
+	pfds[0].revents = 0;
+	pfds[1].fd = info->pipefd[PIPE_R];
+	pfds[1].events = POLLIN;
+	pfds[1].revents = 0;
+
 	while (likely(!zeus->shutdown)) {
 		mutex_lock(&info->lock);
 		if (info->device_fd == -1 && !zeus_reopen(zeus)) {
 			applog(LOG_ERR, "Failed to reopen %s%d on %s, shutting down",
 				zeus->drv->name, zeus->device_id, zeus->device_path);
 			zeus->shutdown = true;
+			mutex_unlock(&info->lock);
 			break;
 		}
+		pfds[0].fd = info->device_fd;
 		mutex_unlock(&info->lock);
 
 		zeus_check_need_work(zeus);
@@ -604,19 +570,14 @@ static void *zeus_io_thread(void *data)
 			if (opt_zeus_debug)
 				applog(LOG_INFO, "Sending work");
 
-			if (!zeus_send_work(zeus, info->current_work))
+			if (zeus_send_work(zeus, info->current_work)) {
+				info->current_work->devflag = true;
+				cgtime(&info->workstart);
+			} else {
+				mutex_unlock(&info->lock);
 				continue;
-			info->current_work->devflag = true;
-			cgtime(&info->workstart);
+			}
 		}
-
-		pfds[0].fd = info->device_fd;
-		pfds[0].events = POLLIN;
-		pfds[0].revents = 0;
-		pfds[1].fd = info->pipefd[PIPE_R];
-		pfds[1].events = POLLIN;
-		pfds[1].revents = 0;
-
 		mutex_unlock(&info->lock);
 
 		cgtime(&tv_now);
@@ -642,6 +603,7 @@ static void *zeus_io_thread(void *data)
 			break;
 		} else if (retval > 0) {
 			if (pfds[0].revents & (POLLERR | POLLNVAL)) {
+				pfds[0].revents = 0;
 				if (opt_zeus_debug) {
 					if (pfds[0].revents & POLLNVAL)
 						applog(LOG_DEBUG, "Device FD %d closed unexpectedly", pfds[0].fd);
@@ -659,6 +621,7 @@ static void *zeus_io_thread(void *data)
 			}
 
 			if (pfds[0].revents & POLLIN) {		// event packet
+				pfds[0].revents = 0;
 				mutex_lock(&info->lock);
 				cgtime(&info->workend);
 				zeus_read_response(zeus);
@@ -666,6 +629,7 @@ static void *zeus_io_thread(void *data)
 			}
 
 			if (pfds[1].revents & POLLIN) {		// miner thread woke us up
+				pfds[1].revents = 0;
 				if (!flush_fd(info->pipefd[PIPE_R])) {
 					// this should never happen
 					applog(LOG_ERR, "%s%d: Inter-thread pipe closed, miner thread dead?",
@@ -675,7 +639,9 @@ static void *zeus_io_thread(void *data)
 				}
 			}
 		} else {					// timeout
+			mutex_lock(&info->lock);
 			zeus_purge_work(zeus);			// abandon current work
+			mutex_unlock(&info->lock);
 		}
 
 		if (opt_zeus_debug)
@@ -699,9 +665,6 @@ static bool zeus_prepare(struct thr_info *thr)
 	struct cgpu_info *zeus = thr->cgpu;
 	struct ZEUS_INFO *info = zeus->device_data;
 
-	if (!zeus_reopen(zeus))
-		return false;
-
 	applog(LOG_NOTICE, "%s%d opened on %s",
 			zeus->drv->name, zeus->device_id, zeus->device_path);
 
@@ -721,7 +684,7 @@ static bool zeus_thread_init(struct thr_info *thr)
 	struct cgpu_info *zeus = thr->cgpu;
 	struct ZEUS_INFO *info = zeus->device_data;
 
-	if (pthread_create(&info->th_io, NULL, zeus_io_thread, zeus)) {
+	if (pthread_create(&info->pth_io, NULL, zeus_io_thread, zeus)) {
 		applog(LOG_ERR, "%s%d: Failed to create I/O thread",
 				zeus->drv->name, zeus->device_id);
 		return false;
@@ -740,12 +703,14 @@ static int64_t zeus_scanwork(struct thr_info *thr)
 
 	cgsleep_ms(100);
 
+	mutex_lock(&info->lock);
 	old_scanwork_time = info->scanwork_time;
 	cgtime(&info->scanwork_time);
 	elapsed_s = tdiff(&info->scanwork_time, &old_scanwork_time);
 
 	estimate_hashes = elapsed_s * info->golden_speed_per_core *
 						info->cores_per_chip * info->chips_count;
+	mutex_unlock(&info->lock);
 
 	if (unlikely(estimate_hashes > 0xffffffff))
 		estimate_hashes = 0xffffffff;
@@ -756,8 +721,11 @@ static int64_t zeus_scanwork(struct thr_info *thr)
 #define zeus_update_work zeus_flush_work
 static void zeus_flush_work(struct cgpu_info *zeus)
 {
+	struct ZEUS_INFO *info = zeus->device_data;
+	mutex_lock(&info->lock);
 	zeus_purge_work(zeus);
 	notify_io_thread(zeus);
+	mutex_unlock(&info->lock);
 	if (opt_zeus_debug)
 		applog(LOG_INFO, "zeus_flush_work: Tickling I/O thread");
 }
@@ -798,7 +766,7 @@ static void zeus_shutdown(struct thr_info *thr)
 
 	applog(LOG_NOTICE, "%s%d: Shutting down", zeus->drv->name, zeus->device_id);
 
-	pthread_join(info->th_io, NULL);
+	pthread_join(info->pth_io, NULL);
 	mutex_destroy(&info->lock);
 	close(info->pipefd[PIPE_R]);
 	close(info->pipefd[PIPE_W]);

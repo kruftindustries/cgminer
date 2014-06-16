@@ -24,8 +24,8 @@
 #define PIPE_W 1
 
 struct ZEUS_INFO {
+	char		device_name[24];
 	int		device_fd;
-	char		*device_name;
 
 	unsigned int	nonce_count[ZEUS_MAX_CHIPS][ZEUS_CHIP_CORES];
 	unsigned int	error_count[ZEUS_MAX_CHIPS][ZEUS_CHIP_CORES];
@@ -34,29 +34,26 @@ struct ZEUS_INFO {
 	struct timeval	workstart;
 	struct timeval	workend;
 	struct timeval	scanwork_time;
-	uint64_t	hashes_per_ms;
+	struct timeval	work_timeout;
+	uint32_t	hashes_per_ms;
+	uint64_t	golden_speed_per_core;	// speed per core per sec
+	uint32_t	read_count;
 	uint32_t	last_nonce;
 
+	unsigned char	freqcode;
+
 	struct thr_info	*thr;
-	pthread_t	th_io;
+	pthread_t	pth_io;
 	pthread_mutex_t	lock;
 	int		pipefd[2];
 
 	struct work	*current_work;
 
-	struct timeval	work_timeout;
-	uint32_t	read_count;
-	uint64_t	golden_speed_per_core; // speed per core per sec
-
-	unsigned char	freqcode;
-
-	int		check_num;
 	int		baud;
 	int		cores_per_chip;
 	int		chips_count_max;
 	int		chips_count;
 	int		chip_clk;
-	uint32_t	clk_header;
 	int		chips_bit_num;		// log2(chips_count_max)
 };
 
