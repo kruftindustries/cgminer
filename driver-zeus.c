@@ -17,6 +17,7 @@
 #include <sys/types.h>
 #include <sys/select.h>
 #include <unistd.h>
+#include <poll.h>
 #ifndef WIN32
   #include <termios.h>
   #include <sys/stat.h>
@@ -60,12 +61,10 @@ static void flush_uart(int fd)
 #endif
 }
 
-static int flush_fd(int fd)			// sadly tcflush only works with terminal fds
-{						// note this function assumes fd is non-blocking
-	static char discard[10];		// so a return of -1 means success for our purposes
-	int ret;
-	while ((ret = read(fd, discard, sizeof(discard))) > 0);
-	return (ret == -1);
+static int flush_fd(int fd)
+{
+	static char discard[10];
+	return read(fd, discard, sizeof(discard));
 }
 
 static void rev(unsigned char *s, size_t l)
@@ -139,30 +138,28 @@ static bool zeus_reopen(struct cgpu_info *zeus)
 	struct ZEUS_INFO *info = zeus->device_data;
 	int fd;
 
-	applog(LOG_DEBUG, "Closing %s%d on %s",
-		zeus->drv->name, zeus->device_id, zeus->device_path);
-
 	if (info->device_fd != -1) {
+		applog(LOG_DEBUG, "Closing %s%d on %s (fd=%d)",
+			zeus->drv->name, zeus->device_id, zeus->device_path, info->device_fd);
 		zeus_close(info->device_fd);
 		info->device_fd = -1;
+		cgsleep_ms(500);
 	}
 
-	cgsleep_ms(1000);
-
-	applog(LOG_DEBUG, "Attempting to reopen %s%d on %s",
-			zeus->drv->name, zeus->device_id, zeus->device_path);
+	applog(LOG_DEBUG, "Attempting to open %s%d on %s",
+		zeus->drv->name, zeus->device_id, zeus->device_path);
 
 	fd = zeus_open(zeus->device_path, info->baud, true);
 	if (unlikely(fd < 0)) {
 		applog(LOG_ERR, "Failed to open %s%d on %s",
-				zeus->drv->name, zeus->device_id, zeus->device_path);
+			zeus->drv->name, zeus->device_id, zeus->device_path);
 		return false;
 	}
 
-	applog(LOG_DEBUG, "Successfully reopened %s%d on %s",
-			zeus->drv->name, zeus->device_id, zeus->device_path);
-
 	info->device_fd = fd;
+
+	applog(LOG_DEBUG, "Successfully opened %s%d on %s (fd=%d)",
+		zeus->drv->name, zeus->device_id, zeus->device_path, info->device_fd);
 
 	return true;
 }
@@ -184,7 +181,7 @@ static int zeus_write(int fd, const void *buf, size_t len)
 	while (total < len) {
 		ret = write(fd, buf, len);
 		if (ret < 0) {
-			applog(LOG_ERR, "zeus_write: error on write: %s", strerror(errno));
+			applog(LOG_ERR, "zeus_write (%d): error on write: %s", fd, strerror(errno));
 			return -1;
 		}
 		total += (size_t)ret;
@@ -202,7 +199,7 @@ static int zeus_read(int fd, void *buf, size_t len, int read_count, struct timev
 	while (total < len) {
 		ret = read(fd, buf + total, len);
 		if (ret < 0) {
-			applog(LOG_ERR, "zeus_read: error on read: %s", strerror(errno));
+			applog(LOG_ERR, "zeus_read (%d): error on read: %s", fd, strerror(errno));
 			return -1;
 		}
 
@@ -351,7 +348,7 @@ static bool zeus_detect_one(const char *devpath)
 		zeus_write(fd, ob_bin, sizeof(ob_bin));
 		cgtime(&tv_start);
 
-		zeus_read(fd, nonce_bin, sizeof(nonce_bin), 50, &tv_finish);
+		zeus_read(fd, nonce_bin, sizeof(nonce_bin), 100, &tv_finish);
 
 		zeus_close(fd);
 
@@ -389,11 +386,11 @@ static bool zeus_detect_one(const char *devpath)
 	if (unlikely(!info))
 		quit(1, "Failed to malloc struct ZEUS_INFO");
 
+	zeus->device_data = info;
 	zeus->drv = &zeus_drv;
 	zeus->device_path = strdup(devpath);
 	zeus->threads = 1;
-	zeus->device_data = info;
-	add_cgpu(zeus);
+	zeus->deven = DEV_ENABLED;
 
 	applog(LOG_NOTICE, "Found Zeus at %s, mark as %d",
 			devpath, zeus->device_id);
@@ -427,6 +424,9 @@ static bool zeus_detect_one(const char *devpath)
 	info->chip_clk=opt_zeus_chip_clk;
 	info->clk_header=clk_header;
 	info->chips_bit_num = log_2(chips_count_max);
+
+	if (!add_cgpu(zeus))
+		quit(1, "Failed to add_cgpu");
 
 	//suffix_string(golden_speed_per_core, info->core_hash, sizeof(info->core_hash), 0);
 	//suffix_string(golden_speed_per_core*cores_per_chip, info->chip_hash, sizeof(info->chip_hash), 0);
@@ -474,7 +474,7 @@ static bool zeus_read_response(struct cgpu_info *zeus)
 	ret = zeus_read(info->device_fd, evtpkt, sizeof(evtpkt), 1, NULL);
 	if (ret <= 0) {
 		applog(LOG_NOTICE, "%s%d: I/O error while reading response, will attempt to reopen device",
-		       zeus->drv->name, zeus->device_id);
+			zeus->drv->name, zeus->device_id);
 		__zeus_purge_work(info);
 		zeus_close(info->device_fd);
 		info->device_fd = -1;
@@ -486,7 +486,16 @@ static bool zeus_read_response(struct cgpu_info *zeus)
 	memcpy(&nonce, evtpkt, sizeof(evtpkt));
 	nonce = be32toh(nonce);
 
+	if (info->current_work == NULL) {	// work was flushed before we read response
+		applog(LOG_DEBUG, "%s%d: Received nonce for flushed work",
+			zeus->drv->name, zeus->device_id);
+		return true;
+	}
+
 	valid = submit_nonce(info->thr, info->current_work, nonce);
+
+	//info->hashes_per_ms = (nonce % (0xffffffff / info->cores_per_chip / info->chips_count)) * info->cores_per_chip * info->chips_count / ms_tdiff(&info->workend, &info->workstart);
+	//applog(LOG_INFO, "hashes_per_ms: %d", info->hashes_per_ms);
 
 	++info->workdone;
 
@@ -568,9 +577,9 @@ static void *zeus_io_thread(void *data)
 	struct cgpu_info *zeus = (struct cgpu_info *)data;
 	struct ZEUS_INFO *info = zeus->device_data;
 	char threadname[24];
-	fd_set rfds;
+	struct pollfd pfds[2];
 	struct timeval tv_now, tv_spent, tv_rem;
-	int retval, maxfd = MAX(info->device_fd, info->pipefd[PIPE_R]);
+	int retval;
 
 	snprintf(threadname, sizeof(threadname), "Zeus/%d", zeus->device_id);
 	RenameThread(threadname);
@@ -578,12 +587,14 @@ static void *zeus_io_thread(void *data)
 						zeus->drv->name, zeus->device_id, threadname);
 
 	while (likely(!zeus->shutdown)) {
+		mutex_lock(&info->lock);
 		if (info->device_fd == -1 && !zeus_reopen(zeus)) {
 			applog(LOG_ERR, "Failed to reopen %s%d on %s, shutting down",
 				zeus->drv->name, zeus->device_id, zeus->device_path);
 			zeus->shutdown = true;
 			break;
 		}
+		mutex_unlock(&info->lock);
 
 		zeus_check_need_work(zeus);
 
@@ -598,12 +609,15 @@ static void *zeus_io_thread(void *data)
 			info->current_work->devflag = true;
 			cgtime(&info->workstart);
 		}
-		mutex_unlock(&info->lock);
 
-		FD_ZERO(&rfds);
-		FD_SET(info->device_fd, &rfds);
-		FD_SET(info->pipefd[PIPE_R], &rfds);
-		maxfd = MAX(info->device_fd, info->pipefd[PIPE_R]);
+		pfds[0].fd = info->device_fd;
+		pfds[0].events = POLLIN;
+		pfds[0].revents = 0;
+		pfds[1].fd = info->pipefd[PIPE_R];
+		pfds[1].events = POLLIN;
+		pfds[1].revents = 0;
+
+		mutex_unlock(&info->lock);
 
 		cgtime(&tv_now);
 		timersub(&tv_now, &info->workstart, &tv_spent);
@@ -615,24 +629,43 @@ static void *zeus_io_thread(void *data)
 			applog(LOG_DEBUG, "select timeout: %d.%06d", (int)tv_rem.tv_sec, (int)tv_rem.tv_usec);
 		}
 
-		retval = select(maxfd + 1, &rfds, NULL, NULL, &tv_rem);
-		if (retval < 0) {					// error
+		retval = poll(pfds, 2, (tv_rem.tv_sec * 1000) + (tv_rem.tv_usec / 1000));
+
+		if (retval < 0) {				// error
 			if (errno == EINTR)
 				continue;
-			applog(LOG_NOTICE, "%s%d: I/O error: %s",
-					zeus->drv->name, zeus->device_id, strerror(errno));
-			__zeus_purge_work(info);
-			zeus_close(info->device_fd);
-			info->device_fd = -1;
-			continue;
+
+			applog(LOG_NOTICE, "%s%d: Error on poll (fd=%d): %s",
+				zeus->drv->name, zeus->device_id, info->device_fd, strerror(errno));
+
+			zeus->shutdown = true;
+			break;
 		} else if (retval > 0) {
-			if (FD_ISSET(info->device_fd, &rfds)) {		// event packet
+			if (pfds[0].revents & (POLLERR | POLLNVAL)) {
+				if (opt_zeus_debug) {
+					if (pfds[0].revents & POLLNVAL)
+						applog(LOG_DEBUG, "Device FD %d closed unexpectedly", pfds[0].fd);
+					else
+						applog(LOG_DEBUG, "Error on file descriptor %d", pfds[0].fd);
+				}
+
+				if (zeus_reopen(zeus))
+					continue;
+
+				applog(LOG_ERR, "Failed to reopen %s%d on %s, shutting down",
+					zeus->drv->name, zeus->device_id, zeus->device_path);
+				zeus->shutdown = true;
+				break;
+			}
+
+			if (pfds[0].revents & POLLIN) {		// event packet
 				mutex_lock(&info->lock);
 				cgtime(&info->workend);
 				zeus_read_response(zeus);
 				mutex_unlock(&info->lock);
 			}
-			if (FD_ISSET(info->pipefd[PIPE_R], &rfds)) {	// miner thread woke us up
+
+			if (pfds[1].revents & POLLIN) {		// miner thread woke us up
 				if (!flush_fd(info->pipefd[PIPE_R])) {
 					// this should never happen
 					applog(LOG_ERR, "%s%d: Inter-thread pipe closed, miner thread dead?",
@@ -641,12 +674,12 @@ static void *zeus_io_thread(void *data)
 					break;
 				}
 			}
-		} else {						// timeout
-			zeus_purge_work(zeus);				// abandon current work
+		} else {					// timeout
+			zeus_purge_work(zeus);			// abandon current work
 		}
 
 		if (opt_zeus_debug)
-			applog(LOG_DEBUG, "select returned with %d", retval);
+			applog(LOG_DEBUG, "poll returned %d", retval);
 	}
 
 	return NULL;
@@ -665,21 +698,12 @@ static bool zeus_prepare(struct thr_info *thr)
 {
 	struct cgpu_info *zeus = thr->cgpu;
 	struct ZEUS_INFO *info = zeus->device_data;
-	//int fd;
 
-	/*
-	fd = zeus_open(zeus->device_path, info->baud, true);
-	if (unlikely(fd < 0)) {
-		applog(LOG_ERR, "Failed to open %s%d on %s",
-					zeus->drv->name, zeus->device_id, zeus->device_path);
+	if (!zeus_reopen(zeus))
 		return false;
-	}
-
-	info->device_fd = fd;
 
 	applog(LOG_NOTICE, "%s%d opened on %s",
 			zeus->drv->name, zeus->device_id, zeus->device_path);
-	*/
 
 	info->thr = thr;
 	mutex_init(&info->lock);
@@ -687,7 +711,7 @@ static bool zeus_prepare(struct thr_info *thr)
 		applog(LOG_ERR, "zeus_prepare: error on pipe: %s", strerror(errno));
 		return false;
 	}
-	fcntl(info->pipefd[PIPE_R], F_SETFL, O_NONBLOCK);
+	//fcntl(info->pipefd[PIPE_R], F_SETFL, O_NONBLOCK);
 
 	return true;
 }
@@ -699,7 +723,7 @@ static bool zeus_thread_init(struct thr_info *thr)
 
 	if (pthread_create(&info->th_io, NULL, zeus_io_thread, zeus)) {
 		applog(LOG_ERR, "%s%d: Failed to create I/O thread",
-						zeus->drv->name, zeus->device_id);
+				zeus->drv->name, zeus->device_id);
 		return false;
 	}
 
@@ -764,7 +788,7 @@ static struct api_data *zeus_api_stats(struct cgpu_info *zeus)
 static void zeus_get_statline_before(char *buf, size_t bufsiz, struct cgpu_info *zeus)
 {
 	struct ZEUS_INFO *info = zeus->device_data;
-	tailsprintf(buf, bufsiz, "%-9s  %4d MHz  ", zeus->device_path, info->chip_clk);
+	tailsprintf(buf, bufsiz, "%-9s  %4d MHz  ", info->device_name, info->chip_clk);
 }
 
 static void zeus_shutdown(struct thr_info *thr)
