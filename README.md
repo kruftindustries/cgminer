@@ -1,7 +1,35 @@
 cgminer-scrypt
 ==============
 
-CGMiner 4.3.0 with Scrypt and GridSeed GC3355 dual-mining support.
+CGMiner 4.3.5 with GridSeed and Zeus scrypt ASIC support.
+
+This file describes Scrypt-specific settings and options.
+For general CGMiner information refer to README.
+Scrypt algorithm code was ported from CGMiner version 3.7.2.
+
+## Zeus ##
+
+	./autogen.sh
+	./configure --enable-scrypt --enable-zeus
+	make
+
+The Zeus driver needs to be configured with two runtime options: the number of
+chips per ASIC device with `--zeus-chips` and the desired clock speed in MHz
+with `--zeus-clock`. Also, since autodetection is currently not implemented,
+attached devices must be specified using `--scan-serial`. Example:
+
+	./cgminer --scrypt --scan-serial /dev/ttyUSB0 --zeus-chips 96 --zeus-clock 328
+
+It is currently not possible to specify different chip counts or clock rates per device.
+
+Chip count for different models: Blizzard: 6, Cyclone: 96
+
+Zeus driver is based on [documentation][zeus-doc] and the official reference implementation.
+Thanks also to sling00 for providing access to test hardware.
+
+[zeus-doc] : <http://zeusminer.com/user-manual-ver-1-0/>
+
+## Gridseed ##
 
 	./autogen.sh
 	./configure --enable-scrypt --enable-gridseed
@@ -20,17 +48,16 @@ sub-options:
 * voltage - switch the voltage to the GC3355 chips; see below
 * led_off - turn off the LEDs on the Gridseed miner
 
-When mining scrypt only this version of cgminer does not initialize the SHA cores so that
+When mining scrypt-only this version of cgminer does not initialize the SHA cores so that
 power usage is low. On a 5-chip USB miner, power usage is around 10 W.
 
-Scrypt code was ported from cgminer version 3.7.2. Gridseed support is based largely on
-the original [Gridseed CGMiner][] and [dtbartle][]'s scrypt modifications.
+Gridseed support is based largely on the original [Gridseed CGMiner][] and
+[dtbartle][]'s scrypt modifications.
 
 [Gridseed CGMiner]: <https://github.com/gridseed/usb-miner/>
 [dtbartle]: <https://github.com/dtbartle/cgminer-gc3355/>
 
-Frequency Tuning
-----------------
+### Frequency Tuning ###
 
 If `pll_r/pll_f/pll_od` are specified, freq is ignored, and calculated as follows:
 * Fin = 25
@@ -39,8 +66,7 @@ If `pll_r/pll_f/pll_od` are specified, freq is ignored, and calculated as follow
 * Fout = int(Fvco / (1 << pll_od))
 * freq = Fout
 
-Dual Mining
------------
+### Dual Mining ###
 
 When dual-mining `start_port` will set the listening proxy port of the first gridseed
 device on the SHA256 instance of cgminer, with additional miners using successive ports.
@@ -52,16 +78,14 @@ ports are in use and will attempt to connect to the first via UDP.
 
 If everything is working the same devices will appear in both cgminer windows.
 
-Voltage Modding
----------------
+### Voltage Modding ###
 
 If `voltage=1` is set the gridseed chips will be switched to an alternate voltage.
 Specifically, this flag will cause the MCU to assert the VID0 input to the voltage
 regulator. This *requires* a voltmodded miner. On a stock unit this will actually
 reduce the regulator's output voltage.
 
-More Complex Options
---------------------
+### More Complex Options ###
 
 The options can also be specified for each device individually by serial number via
 `--gridseed-freq` or `--gridseed-override` or their configuration file equivalents.

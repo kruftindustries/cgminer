@@ -148,3 +148,7 @@ endif
 if HAS_GRIDSEED
 cgminer_SOURCES += driver-gridseed.c driver-gridseed.h
 endif
+
+if HAS_ZEUS
+cgminer_SOURCES += driver-zeus.c driver-zeus.h
+endif

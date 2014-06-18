@@ -102,6 +102,10 @@ char *curly = ":D";
 #include "driver-gridseed.h"
 #endif
 
+#ifdef USE_ZEUS
+#include "driver-zeus.h"
+#endif
+
 #if defined(USE_BITFORCE) || defined(USE_ICARUS) || defined(USE_AVALON) || defined(USE_AVALON2) || defined(USE_MODMINER)
 #	define USE_FPGA
 #endif
@@ -168,6 +172,7 @@ time_t last_getwork;
 #if defined(USE_USBUTILS)
 int nDevs;
 #endif
+bool opt_sha256;
 #ifdef USE_SCRYPT
 bool opt_scrypt;
 #endif
@@ -255,6 +260,12 @@ static char *opt_set_hfa_fan;
 char *opt_gridseed_options = NULL;
 char *opt_gridseed_freq = NULL;
 char *opt_gridseed_override = NULL;
+#endif
+#ifdef USE_ZEUS
+bool opt_zeus_debug;
+int opt_zeus_chips_count;
+int opt_zeus_chip_clk;
+bool opt_zeus_nocheck_golden;
 #endif
 static char *opt_set_null;
 #ifdef USE_MINION
@@ -767,6 +778,11 @@ static char *set_int_1_to_10(const char *arg, int *i)
 static char __maybe_unused *set_int_0_to_4(const char *arg, int *i)
 {
 	return set_int_range(arg, i, 0, 4);
+}
+
+static char *set_int_1_to_1024(const char *arg, int *i)
+{
+        return set_int_range(arg, i, 1, 1024);
 }
 
 #ifdef USE_FPGA_SERIAL
@@ -1460,6 +1476,9 @@ static struct opt_table opt_config_table[] = {
 	OPT_WITH_CBARG("--sched-stop",
 		     set_sched_stop, NULL, &opt_set_sched_stop,
 		     "Set a time of day in HH:MM to stop mining (will quit without a start time)"),
+	OPT_WITHOUT_ARG("--sha256",
+		     opt_set_bool, &opt_sha256,
+		     "Use the SHA-256 algorithm for mining"),
 #ifdef USE_SCRYPT
 	OPT_WITHOUT_ARG("--scrypt",
 		     opt_set_bool, &opt_scrypt,
@@ -1521,6 +1540,20 @@ static struct opt_table opt_config_table[] = {
 	OPT_WITHOUT_ARG("--worktime",
 			opt_set_bool, &opt_worktime,
 			"Display extra work time debug information"),
+#ifdef USE_ZEUS
+	OPT_WITH_ARG("--zeus-chips",
+			set_int_1_to_1024, NULL, &opt_zeus_chips_count,
+			"Number of Zeus chips per device"),
+	OPT_WITH_ARG("--zeus-clock",
+			opt_set_intval, NULL, &opt_zeus_chip_clk,
+			"Zeus chip clock speed (MHz)"),
+	OPT_WITHOUT_ARG("--zeus-debug",
+			opt_set_bool, &opt_zeus_debug,
+			"Enable extra Zeus driver debugging output in verbose mode"),
+	OPT_WITHOUT_ARG("--zeus-nocheck-golden",
+			opt_set_bool, &opt_zeus_nocheck_golden,
+			"Skip golden nonce verification during initialization"),
+#endif
 	OPT_ENDTABLE
 };
 
@@ -1747,6 +1780,9 @@ static char *opt_verusage_and_exit(const char *extra)
 #endif
 #ifdef USE_GRIDSEED
 		"GridSeed "
+#endif
+#ifdef USE_ZEUS
+		"Zeus "
 #endif
 #ifdef USE_SCRYPT
 		"scrypt "
@@ -5033,7 +5069,8 @@ void write_config(FILE *fcfg)
 			     (void *)opt->cb_arg == (void *)set_int_0_to_100 ||
 			     (void *)opt->cb_arg == (void *)set_int_0_to_255 ||
 			     (void *)opt->cb_arg == (void *)set_int_0_to_200 ||
-			     (void *)opt->cb_arg == (void *)set_int_32_to_63)) {
+			     (void *)opt->cb_arg == (void *)set_int_32_to_63 ||
+			     (void *)opt->cb_arg == (void *)set_int_1_to_1024)) {
 				fprintf(fcfg, ",\n\"%s\" : \"%d\"", p+2, *(int *)opt->u.arg);
 				continue;
 			}
@@ -9386,11 +9423,14 @@ int main(int argc, char *argv[])
 	if (!config_loaded)
 		load_default_config();
 
+	if (!opt_sha256 && !opt_scrypt)
+		early_quit(1, "Must explicitly specify mining algorithm (--sha256 or --scrypt)");
+
 	if (opt_benchmark || opt_benchfile) {
 		struct pool *pool;
 
 		if (opt_scrypt)
-			quit(1, "Cannot use benchmark mode with scrypt");
+			early_quit(1, "Cannot use benchmark mode with scrypt");
 
 		pool = add_pool();
 		pool->rpc_url = malloc(255);

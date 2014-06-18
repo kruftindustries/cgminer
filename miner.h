@@ -245,7 +245,8 @@ static inline int fsync (int fd)
 	DRIVER_ADD_COMMAND(avalon2) \
 	DRIVER_ADD_COMMAND(avalon) \
 	DRIVER_ADD_COMMAND(spondoolies) \
-	DRIVER_ADD_COMMAND(gridseed)
+	DRIVER_ADD_COMMAND(gridseed) \
+	DRIVER_ADD_COMMAND(zeus)
 
 #define DRIVER_PARSE_COMMANDS(DRIVER_ADD_COMMAND) \
 	FPGA_PARSE_COMMANDS(DRIVER_ADD_COMMAND) \
@@ -1041,6 +1042,12 @@ extern char *opt_gridseed_options;
 extern char *opt_gridseed_freq;
 extern char *opt_gridseed_override;
 #endif
+#ifdef USE_ZEUS
+extern bool opt_zeus_debug;
+extern int opt_zeus_chips_count;
+extern int opt_zeus_chip_clk;
+extern bool opt_zeus_nocheck_golden;
+#endif
 extern int swork_id;
 
 #if LOCK_TRACKING
@@ -1505,6 +1512,7 @@ enum api_data_type {
 	API_STRING,
 	API_CONST,
 	API_UINT8,
+	API_SHORT,
 	API_INT16,
 	API_UINT16,
 	API_INT,
@@ -1544,6 +1552,7 @@ extern struct api_data *api_add_escape(struct api_data *root, char *name, char *
 extern struct api_data *api_add_string(struct api_data *root, char *name, char *data, bool copy_data);
 extern struct api_data *api_add_const(struct api_data *root, char *name, const char *data, bool copy_data);
 extern struct api_data *api_add_uint8(struct api_data *root, char *name, uint8_t *data, bool copy_data);
+extern struct api_data *api_add_short(struct api_data *root, char *name, short *data, bool copy_data);
 extern struct api_data *api_add_int16(struct api_data *root, char *name, uint16_t *data, bool copy_data);
 extern struct api_data *api_add_uint16(struct api_data *root, char *name, uint16_t *data, bool copy_data);
 extern struct api_data *api_add_int(struct api_data *root, char *name, int *data, bool copy_data);

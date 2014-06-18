@@ -350,6 +350,20 @@ fi
 AM_CONDITIONAL([HAS_GRIDSEED], [test x$gridseed = xyes])
 
 
+
+zeus="no"
+
+AC_ARG_ENABLE([zeus],
+	[AC_HELP_STRING([--enable-zeus],[Compile support for Zeusminer (default disabled) (EXPERIMENTAL)])],
+	[zeus=$enableval]
+	)
+if test "x$zeus" = xyes; then
+	AC_DEFINE([USE_FPGA_SERIAL], [1], [Defined to 1 if serial support required])
+	AC_DEFINE([USE_ZEUS], [1], [Defined to 1 if Zeus support is wanted])
+fi
+AM_CONDITIONAL([HAS_ZEUS], [test x$zeus = xyes])
+
+
 curses="auto"
 
 AC_ARG_WITH([curses],
@@ -386,7 +400,7 @@ else
 	want_libbitfury=false
 fi
 
-AM_CONDITIONAL([NEED_FPGAUTILS], [test x$avalon2$modminer != xno])
+AM_CONDITIONAL([NEED_FPGAUTILS], [test x$avalon2$modminer$zeus != xnonono])
 AM_CONDITIONAL([WANT_USBUTILS], [test x$want_usbutils != xfalse])
 AM_CONDITIONAL([WANT_LIBBITFURY], [test x$want_libbitfury != xfalse])
 AM_CONDITIONAL([HAVE_CURSES], [test x$curses = xyes])
@@ -674,7 +688,13 @@ else
 	echo "  GridSeed.ASICs.......: Disabled"
 fi
 
-if test "x$avalon$avalon2$bab$bflsc$bitforce$bitfury$hashfast$icarus$klondike$knc$modminer$drillbit$minion$cointerra$bitmine_A1$ants1$ants2$spondoolies$gridseed" = xnonononononononononononononononononono; then
+if test "x$zeus" = xyes; then
+	echo "  Zeus.ASICs...........: Enabled"
+else
+	echo "  Zeus.ASICs...........: Disabled"
+fi
+
+if test "x$avalon$avalon2$bab$bflsc$bitforce$bitfury$hashfast$icarus$klondike$knc$modminer$drillbit$minion$cointerra$bitmine_A1$ants1$ants2$spondoolies$gridseed$zeus" = xnononononononononononononononononononono; then
 	AC_MSG_ERROR([No mining configured in])
 fi
 
