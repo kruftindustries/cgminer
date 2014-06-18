@@ -739,21 +739,35 @@ static struct api_data *zeus_api_stats(struct cgpu_info *zeus)
 {
 	struct ZEUS_INFO *info = zeus->device_data;
 	struct api_data *root = NULL;
+	static struct timeval tv_now, tv_diff;
 	static double khs_core, khs_chip, khs_board;
 
+	cgtime(&tv_now);
+	timersub(&tv_now, &(info->workstart), &tv_diff);
+
+	root = api_add_string(root, "Name", info->device_name, false);
 	khs_core = (double)info->golden_speed_per_core / 1000.;
 	khs_chip = (double)info->golden_speed_per_core * (double)info->cores_per_chip / 1000.;
 	khs_board = (double)info->golden_speed_per_core * (double)info->cores_per_chip * (double)info->chips_count / 1000.;
 	root = api_add_khs(root, "KHS/Core", &khs_core, false);
 	root = api_add_khs(root, "KHS/Chip", &khs_chip, false);
 	root = api_add_khs(root, "KHS/Board", &khs_board, false);
-	//root = api_add_string(root, "core_hash", info->core_hash, false);
-	//root = api_add_string(root, "chip_hash", info->chip_hash, false);
-	//root = api_add_string(root, "board_hash", info->board_hash, false);
-	root = api_add_int(root, "chip_clk", &(info->chip_clk), false);
-	root = api_add_int(root, "chips_count", &(info->chips_count), false);
-	root = api_add_int(root, "chips_count_max", &(info->chips_count_max), false);
-	root = api_add_uint32(root, "read_count", &(info->read_count), false);
+	root = api_add_int(root, "Frequency", &(info->chip_clk), false);
+	root = api_add_int(root, "Cores/Chip", &(info->cores_per_chip), false);
+	root = api_add_int(root, "Chips Count", &(info->chips_count), false);
+	root = api_add_timeval(root, "Time Spent Current Work", &tv_diff, false);
+	root = api_add_timeval(root, "Work Timeout", &(info->work_timeout), false);
+	/* It would be nice to report per chip/core nonce and error counts,
+	 * but with more powerful miners with > 100 chips each with 8 cores
+	 * there is too much information and we'd overflow the api buffer.
+	 * Perhaps another api command to query individual chips? */
+
+	/* these values are more for diagnostic and debugging */
+	if (opt_zeus_debug) {
+		root = api_add_int(root, "chips_count_max", &(info->chips_count_max), false);
+		root = api_add_int(root, "chips_bit_num", &(info->chips_bit_num), false);
+		root = api_add_uint32(root, "read_count", &(info->read_count), false);
+	}
 
 	return root;
 }
