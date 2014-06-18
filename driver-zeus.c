@@ -424,8 +424,8 @@ static bool zeus_read_response(struct cgpu_info *zeus)
 {
 	struct ZEUS_INFO *info = zeus->device_data;
 	unsigned char evtpkt[ZEUS_EVENT_PKT_LEN];
-	int ret, chip, core;
-	uint32_t nonce;
+	int ret;
+	uint32_t nonce, chip, core;
 	bool valid;
 
 	ret = zeus_read(info->device_fd, evtpkt, sizeof(evtpkt), 1, NULL);
@@ -456,12 +456,17 @@ static bool zeus_read_response(struct cgpu_info *zeus)
 
 	++info->workdone;
 
-	chip = (int)chip_index(nonce, info->chips_bit_num);
-	core = (int)(nonce & 0xe0000000) >> 29;	// core indicated by 3 highest bits
+	chip = chip_index(nonce, info->chips_bit_num);
+	core = (nonce & 0xe0000000) >> 29;		// core indicated by 3 highest bits
 
-	++info->nonce_count[chip][core];
-	if (!valid)
-		++info->error_count[chip][core];
+	if (chip < ZEUS_MAX_CHIPS && core < ZEUS_CHIP_CORES) {
+		++info->nonce_count[chip][core];
+		if (!valid)
+			++info->error_count[chip][core];
+	} else {
+		applog(LOG_INFO, "%s%d: Corrupt nonce message received, cannot determine chip and core",
+			zeus->drv->name, zeus->device_id);
+	}
 
 	return true;
 }
