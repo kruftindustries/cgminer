@@ -745,7 +745,7 @@ static struct api_data *zeus_api_stats(struct cgpu_info *zeus)
 	cgtime(&tv_now);
 	timersub(&tv_now, &(info->workstart), &tv_diff);
 
-	root = api_add_string(root, "Name", info->device_name, false);
+	root = api_add_string(root, "Device Name", info->device_name, false);
 	khs_core = (double)info->golden_speed_per_core / 1000.;
 	khs_chip = (double)info->golden_speed_per_core * (double)info->cores_per_chip / 1000.;
 	khs_board = (double)info->golden_speed_per_core * (double)info->cores_per_chip * (double)info->chips_count / 1000.;

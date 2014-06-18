@@ -1846,11 +1846,17 @@ static struct api_data *gridseed_api_stats(struct cgpu_info *gridseed)
 	root = api_add_string(root, "Mode", mode_str, false);
 	root = api_add_string(root, "Serial", info->serial, false);
 	root = api_add_int(root, "Frequency", &(info->freq), false);
+	root = api_add_int(root, "Baud", &(info->baud), false);
+	root = api_add_int(root, "Chips", &(info->chips), false);
+	root = api_add_int(root, "BTCore", &(info->btcore), false);
+	root = api_add_int(root, "Modules", &(info->modules), false);
+	root = api_add_int(root, "Use FIFO", &(info->usefifo), false);
 	root = api_add_int(root, "Voltage", &(info->voltage), false);
-	if (SHA256_MODE(info->mode)) {
-		root = api_add_int(root, "Scrypt Proxy Port", &info->sockltc, false);
+	root = api_add_int(root, "Per Chip Stats", &(info->per_chip_stats), false);
+	if (SHA256_MODE(info->mode) || info->mode == MODE_SCRYPT_DUAL) {
+		root = api_add_short(root, "Scrypt Proxy Port", &info->ltc_port, false);
 	}
-	root = api_add_string(root, "LTC Workstart", ctime(&(info->ltc_workstart.tv_sec)), false);
+	root = api_add_timeval(root, "LTC Workstart", &(info->ltc_workstart), false);
 
 	return root;
 }
