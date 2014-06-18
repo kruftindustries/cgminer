@@ -1552,7 +1552,7 @@ static struct opt_table opt_config_table[] = {
 			"Enable extra Zeus driver debugging output in verbose mode"),
 	OPT_WITHOUT_ARG("--zeus-nocheck-golden",
 			opt_set_bool, &opt_zeus_nocheck_golden,
-			opt_hidden),
+			"Skip golden nonce verification during initialization"),
 #endif
 	OPT_ENDTABLE
 };

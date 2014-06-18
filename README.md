@@ -3,6 +3,10 @@ cgminer-scrypt
 
 CGMiner 4.3.5 with GridSeed and Zeus scrypt ASIC support.
 
+This file describes Scrypt-specific settings and options.
+For general CGMiner information refer to README.
+Scrypt algorithm code was ported from CGMiner version 3.7.2.
+
 ## Zeus ##
 
 	./autogen.sh
@@ -18,10 +22,12 @@ attached devices must be specified using `--scan-serial`. Example:
 
 It is currently not possible to specify different chip counts or clock rates per device.
 
-Chip count for different models:
+Chip count for different models: Blizzard: 6, Cyclone: 96
 
-Blizzard: 6
-Cyclone: 96
+Zeus driver is based on [documentation][zeus-doc] and the official reference implementation.
+Thanks also to sling00 for providing access to test hardware.
+
+[zeus-doc] : <http://zeusminer.com/user-manual-ver-1-0/>
 
 ## Gridseed ##
 
@@ -42,11 +48,11 @@ sub-options:
 * voltage - switch the voltage to the GC3355 chips; see below
 * led_off - turn off the LEDs on the Gridseed miner
 
-When mining scrypt only this version of cgminer does not initialize the SHA cores so that
+When mining scrypt-only this version of cgminer does not initialize the SHA cores so that
 power usage is low. On a 5-chip USB miner, power usage is around 10 W.
 
-Scrypt code was ported from cgminer version 3.7.2. Gridseed support is based largely on
-the original [Gridseed CGMiner][] and [dtbartle][]'s scrypt modifications.
+Gridseed support is based largely on the original [Gridseed CGMiner][] and
+[dtbartle][]'s scrypt modifications.
 
 [Gridseed CGMiner]: <https://github.com/gridseed/usb-miner/>
 [dtbartle]: <https://github.com/dtbartle/cgminer-gc3355/>
