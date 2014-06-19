@@ -2279,7 +2279,13 @@ reldame:
 
 cldame:
 #ifdef LINUX
-	libusb_attach_kernel_driver(cgusb->handle, THISIF(found, ifinfo));
+	for (ifinfo = 0; ifinfo < found->intinfo_count; ifinfo++) {
+		if ((err = libusb_attach_kernel_driver(cgusb->handle, THISIF(found, ifinfo))) != 0) {
+			applog(LOG_DEBUG,
+			"USB init, failed to reattach kernel driver, err %d %s",
+			err, devstr);
+		}
+	}
 
 nokernel:
 #endif
