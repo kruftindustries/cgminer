@@ -304,7 +304,7 @@ static bool zeus_detect_one(const char *devpath)
 	ob_bin[3] = 0x01;
 	for (i = 0; i < 2; ++i) {
 		zeus_write(fd, ob_bin, sizeof(ob_bin));
-		sleep(1);
+		cgsleep_ms(500);	// what is the minimum the miners need/will accept?
 		flush_uart(fd);
 	}
 
@@ -315,7 +315,7 @@ static bool zeus_detect_one(const char *devpath)
 	ob_bin[3] = 0x01;
 	for (i = 0; i < 2; ++i) {
 		zeus_write(fd, ob_bin, sizeof(ob_bin));
-		sleep(1);
+		cgsleep_ms(500);
 		flush_uart(fd);
 	}
 
@@ -328,9 +328,13 @@ static bool zeus_detect_one(const char *devpath)
 		ob_bin[2] = 0x00;
 		ob_bin[3] = 0x01;
 
-		zeus_write(fd, ob_bin, sizeof(ob_bin));
-		cgtime(&tv_start);
-		zeus_read(fd, nonce_bin, sizeof(nonce_bin), 100, &tv_finish);
+		for (i = 0; i < 2; ++i) {
+			zeus_write(fd, ob_bin, sizeof(ob_bin));
+			cgtime(&tv_start);
+			if (zeus_read(fd, nonce_bin, sizeof(nonce_bin), 25, &tv_finish) == sizeof(nonce_bin))
+				break;
+		}
+
 		zeus_close(fd);
 
 		memcpy(&nonce, nonce_bin, sizeof(nonce_bin));
