@@ -389,6 +389,7 @@ static bool zeus_detect_one(const char *devpath)
 	info->golden_speed_per_core = golden_speed_per_core;
 	info->read_count = (uint32_t)((4294967296LL*10)/(cores_per_chip*chips_count_max*golden_speed_per_core*2));
 	info->read_count = info->read_count*3/4;
+	info->next_chip_clk = -1;
 
 	info->freqcode = freqcode;
 
@@ -578,6 +579,10 @@ static void *zeus_io_thread(void *data)
 			if (zeus_send_work(zeus, info->current_work)) {
 				info->current_work->devflag = true;
 				cgtime(&info->workstart);
+				if (info->next_chip_clk != -1) {
+					info->chip_clk = info->next_chip_clk;
+					info->next_chip_clk = -1;
+				}
 			} else {
 				mutex_unlock(&info->lock);
 				continue;
@@ -778,6 +783,59 @@ static void zeus_get_statline_before(char *buf, size_t bufsiz, struct cgpu_info 
 	tailsprintf(buf, bufsiz, "%-9s  %4d MHz  ", info->device_name, info->chip_clk);
 }
 
+static char *zeus_set_device(struct cgpu_info *zeus, char *option, char *setting, char *replybuf)
+{
+	struct ZEUS_INFO *info = zeus->device_data;
+	int val;
+
+	if (strcasecmp(option, "help") == 0) {
+		sprintf(replybuf, "freq: range %d-%d, abortwork: true/false",
+				ZEUS_CLK_MIN, ZEUS_CLK_MAX);
+		return replybuf;
+	}
+
+	if (strcasecmp(option, "freq") == 0) {
+		if (!setting || !*setting) {
+			sprintf(replybuf, "missing freq setting");
+			return replybuf;
+		}
+
+		val = atoi(setting);
+		if (val < ZEUS_CLK_MIN || val > ZEUS_CLK_MAX) {
+			sprintf(replybuf, "invalid freq: '%s' valid range %d-%d",
+					setting, ZEUS_CLK_MIN, ZEUS_CLK_MAX);
+			return replybuf;
+		}
+
+		mutex_lock(&info->lock);
+		info->next_chip_clk = val;
+		info->freqcode = zeus_clk_to_freqcode(val);
+		mutex_unlock(&info->lock);
+		return NULL;
+	}
+
+	if (strcasecmp(option, "abortwork") == 0) {
+		if (!setting || !*setting) {
+			sprintf(replybuf, "missing true/false");
+			return replybuf;
+		}
+
+		if (strcasecmp(setting, "true") != 0) {
+			sprintf(replybuf, "not aborting current work");
+			return replybuf;
+		}
+
+		mutex_lock(&info->lock);
+		zeus_purge_work(zeus);
+		notify_io_thread(zeus);
+		mutex_unlock(&info->lock);
+		return NULL;
+	}
+
+	sprintf(replybuf, "Unknown option: %s", option);
+	return replybuf;
+}
+
 static void zeus_shutdown(struct thr_info *thr)
 {
 	struct cgpu_info *zeus = thr->cgpu;
@@ -810,5 +868,6 @@ struct device_drv zeus_drv = {
 		//.update_work = zeus_update_work,	// redundant, always seems to be called together with flush_work ??
 		.get_api_stats = zeus_api_stats,
 		.get_statline_before = zeus_get_statline_before,
+		.set_device = zeus_set_device,
 		.thread_shutdown = zeus_shutdown,
 };

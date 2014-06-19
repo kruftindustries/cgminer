@@ -39,6 +39,7 @@ struct ZEUS_INFO {
 	uint64_t	golden_speed_per_core;	// speed per core per sec
 	uint32_t	read_count;
 	uint32_t	last_nonce;
+	int		next_chip_clk;
 
 	unsigned char	freqcode;
 
