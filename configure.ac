@@ -388,7 +388,7 @@ else
 	])
 fi
 
-if test x$avalon$bitforce$bitfury$modminer$bflsc$icarus$hashfast$klondike$drillbit$cointerra$ants1$ants2$gridseed != xnonononononononononononono; then
+if test x$avalon$bitforce$bitfury$modminer$bflsc$icarus$hashfast$klondike$drillbit$cointerra$ants1$ants2$gridseed$zeus != xnononononononononononononono; then
 	want_usbutils=true
 else
 	want_usbutils=false
