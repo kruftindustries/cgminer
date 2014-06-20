@@ -400,6 +400,12 @@ else
 	want_libbitfury=false
 fi
 
+if test x$zeus != xno; then
+	want_libudev=true
+else
+	want_libudev=false
+fi
+
 AM_CONDITIONAL([NEED_FPGAUTILS], [test x$avalon2$modminer$zeus != xnonono])
 AM_CONDITIONAL([WANT_USBUTILS], [test x$want_usbutils != xfalse])
 AM_CONDITIONAL([WANT_LIBBITFURY], [test x$want_libbitfury != xfalse])
@@ -441,6 +447,15 @@ else
 	LIBUSB_LIBS=""
 fi
 
+if test "x$want_libudev" != xfalse; then
+	if test "x$have_linux" = "xtrue"; then
+		AC_DEFINE([HAVE_LIBUDEV], [1], [Defined to 1 if udev support available])
+		LIBUDEV_LIBS="-ludev"
+	fi
+else
+	LIBUDEV_LIBS=""
+fi
+
 AM_CONDITIONAL([WANT_STATIC_LIBUSB], [test x$dlibusb = xno])
 
 AC_CONFIG_SUBDIRS([compat/jansson-2.5])
@@ -460,6 +475,8 @@ fi
 
 AC_SUBST(LIBUSB_LIBS)
 AC_SUBST(LIBUSB_CFLAGS)
+
+AC_SUBST(LIBUDEV_LIBS)
 
 AC_ARG_ENABLE([libcurl],
 	[AC_HELP_STRING([--disable-libcurl],[Disable building with libcurl for getwork and GBT support])],
@@ -703,7 +720,7 @@ echo "Compilation............: make (or gmake)"
 echo "  CPPFLAGS.............: $CPPFLAGS"
 echo "  CFLAGS...............: $CFLAGS"
 echo "  LDFLAGS..............: $LDFLAGS $PTHREAD_FLAGS"
-echo "  LDADD................: $DLOPEN_FLAGS $LIBCURL_LIBS $JANSSON_LIBS $PTHREAD_LIBS $NCURSES_LIBS $PDCURSES_LIBS $WS2_LIBS $MATH_LIBS $LIBUSB_LIBS $RT_LIBS"
+echo "  LDADD................: $DLOPEN_FLAGS $LIBCURL_LIBS $JANSSON_LIBS $PTHREAD_LIBS $NCURSES_LIBS $PDCURSES_LIBS $WS2_LIBS $MATH_LIBS $LIBUSB_LIBS $LIBUDEV_LIBS $RT_LIBS"
 echo
 echo "Installation...........: make install (as root if needed, with 'su' or 'sudo')"
 echo "  prefix...............: $prefix"
