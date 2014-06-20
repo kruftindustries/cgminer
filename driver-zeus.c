@@ -38,11 +38,10 @@
 extern bool opt_zeus_debug;
 extern int opt_zeus_chips_count;		// number of Zeus chips chained together
 extern int opt_zeus_chip_clk;			// frequency to run chips with
-extern bool opt_zeus_nocheck_golden;	// bypass hashrate check
+extern bool opt_zeus_nocheck_golden;		// bypass hashrate check
 
-static int opt_zeus_chips_count_max = 1;// smallest power of 2 >= opt_zeus_chips_count
-										// is currently auto-calculated, cannot be
-										// specified on command line
+//static int opt_zeus_chips_count_max = 1;	// smallest power of 2 >= opt_zeus_chips_count
+						// is currently auto-calculated
 
 // Index for device-specific options
 //static int option_offset = -1;
@@ -251,10 +250,21 @@ static unsigned char zeus_clk_to_freqcode(int clkfreq)
 	return (unsigned char)((double)clkfreq * 2. / 3.);
 }
 
+static void zeus_get_device_options(const char __maybe_unused *devpath, int *chips_count, int *chip_clk)
+{
+	/*
+	 * Placeholder for now, eventually return device-specific
+	 * chips count and clock rate here
+	 */
+
+	*chips_count = opt_zeus_chips_count;	// number of chips per ASIC device
+	*chip_clk = opt_zeus_chip_clk;
+}
+
 static bool zeus_detect_one(const char *devpath)
 {
 	struct timeval tv_start, tv_finish;
-	int i, fd, baud, cores_per_chip, chips_count_max, chips_count;
+	int i, fd, baud, cores_per_chip, chips_count_max, chips_count, chip_clk;
 	//int this_option_offset = ++option_offset;
 	unsigned char freqcode_init, freqcode;
 	char *tmp;
@@ -272,12 +282,13 @@ static bool zeus_detect_one(const char *devpath)
 			"55aa00ff"
 			"c00278894532091be6f16a5381ad33619dacb9e6a4a6e79956aac97b51112bfb93dc450b8fc765181a344b6244d42d78625f5c39463bbfdc10405ff711dc1222dd065b015ac9c2c66e28da7202000000";
 
+	zeus_get_device_options(devpath, &chips_count, &chip_clk);
 	baud = ZEUS_IO_SPEED;				// baud rate is fixed
 	cores_per_chip = ZEUS_CHIP_CORES;		// cores/chip also fixed
-	chips_count = opt_zeus_chips_count;		// number of chips per ASIC device
-	if (chips_count > opt_zeus_chips_count_max)
-		opt_zeus_chips_count_max = lowest_pow2(chips_count);
-	chips_count_max = opt_zeus_chips_count_max;
+	chips_count_max = lowest_pow2(chips_count);
+	//if (chips_count > opt_zeus_chips_count_max)
+	//	opt_zeus_chips_count_max = lowest_pow2(chips_count);
+	//chips_count_max = opt_zeus_chips_count_max;
 
 	applog(LOG_INFO, "Zeus Detect: Attempting to open %s", devpath);
 
@@ -287,10 +298,10 @@ static bool zeus_detect_one(const char *devpath)
 		return false;
 	}
 
-	freqcode = zeus_clk_to_freqcode(opt_zeus_chip_clk);
+	freqcode = zeus_clk_to_freqcode(chip_clk);
 
 	// from 150M step to the high or low speed. we need to add delay and resend to init chip
-	if (opt_zeus_chip_clk > 150)
+	if (chip_clk > 150)
 		freqcode_init = zeus_clk_to_freqcode(165);
 	else
 		freqcode_init = zeus_clk_to_freqcode(139);
@@ -354,7 +365,7 @@ static bool zeus_detect_one(const char *devpath)
 					devpath, nonce);
 	} else {
 		zeus_close(fd);
-		golden_speed_per_core = (((opt_zeus_chip_clk * 2.) / 3.) * 1024.) / 8.;
+		golden_speed_per_core = (((chip_clk * 2.) / 3.) * 1024.) / 8.;
 	}
 
 	/* We have a real Zeus miner! */
@@ -403,7 +414,7 @@ static bool zeus_detect_one(const char *devpath)
 	info->chips_count_max = chips_count_max;
 	if ((chips_count_max & (chips_count_max - 1)) != 0)
 		quit(1, "chips_count_max must be a power of 2");
-	info->chip_clk = opt_zeus_chip_clk;
+	info->chip_clk = chip_clk;
 	info->chips_bit_num = log_2(chips_count_max);
 
 	if (!add_cgpu(zeus))
@@ -669,9 +680,14 @@ static void *zeus_io_thread(void *data)
  * CGMiner Interface functions
  ************************************************************/
 
+static int zeus_autoscan()
+{
+	return serial_autodetect_udev(zeus_detect_one, ZEUS_USB_ID_MODEL_STR);
+}
+
 static void zeus_detect(bool __maybe_unused hotplug)
 {
-	serial_detect(&zeus_drv, zeus_detect_one);
+	serial_detect_auto(&zeus_drv, zeus_detect_one, zeus_autoscan);
 }
 
 static bool zeus_prepare(struct thr_info *thr)
