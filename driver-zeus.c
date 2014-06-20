@@ -46,6 +46,16 @@ extern bool opt_zeus_nocheck_golden;		// bypass hashrate check
 // Index for device-specific options
 //static int option_offset = -1;
 
+static struct name_chip_map {
+	char	*model_name;
+	int	chips_count;
+} zeus_models[] = {
+	{ "Blizzard",	6  },
+	{ "Cyclone",	96 },
+	/* TODO: add more models */
+	{ NULL, 0 }
+};
+
 /************************************************************
  * Utility Functions
  ************************************************************/
@@ -106,7 +116,7 @@ static uint32_t __maybe_unused chip_index(uint32_t value, int bit_num)
 	return newvalue;
 }
 
-int lowest_pow2(int min)
+static int lowest_pow2(int min)
 {
 	int i;
 	for (i = 1; i < 1024; i = i * 2) {
@@ -261,13 +271,24 @@ static void zeus_get_device_options(const char __maybe_unused *devpath, int *chi
 	*chip_clk = opt_zeus_chip_clk;
 }
 
+static char *zeus_device_name(int chips_count)
+{
+	struct name_chip_map *p;
+
+	for (p = zeus_models; p->model_name != NULL; ++p) {
+		if (p->chips_count == chips_count)
+			return p->model_name;
+	}
+
+	return NULL;
+}
+
 static bool zeus_detect_one(const char *devpath)
 {
 	struct timeval tv_start, tv_finish;
 	int i, fd, baud, cores_per_chip, chips_count_max, chips_count, chip_clk;
 	//int this_option_offset = ++option_offset;
 	unsigned char freqcode_init, freqcode;
-	char *tmp;
 	uint32_t nonce;
 	uint64_t golden_speed_per_core;
 
@@ -379,11 +400,12 @@ static bool zeus_detect_one(const char *devpath)
 	if (unlikely(!info))
 		quit(1, "Failed to malloc struct ZEUS_INFO");
 
-	zeus->device_data = info;
 	zeus->drv = &zeus_drv;
+	zeus->name = zeus_device_name(chips_count);
 	zeus->device_path = strdup(devpath);
-	zeus->threads = 1;
+	zeus->device_data = info;
 	zeus->deven = DEV_ENABLED;
+	zeus->threads = 1;
 
 	applog(LOG_NOTICE, "Found Zeus at %s, mark as %d",
 			devpath, zeus->device_id);
@@ -392,11 +414,12 @@ static bool zeus_detect_one(const char *devpath)
 			zeus->device_id, baud, cores_per_chip, chips_count);
 
 	info->device_fd = -1;
-	tmp = strrchr(zeus->device_path, '/');
-	if (tmp == NULL)
-		strncpy(info->device_name, zeus->device_path, sizeof(info->device_name) - 1);
+	zeus->unique_id = strrchr(zeus->device_path, '/');
+	if (zeus->unique_id == NULL)
+		zeus->unique_id = zeus->device_path;
 	else
-		strncpy(info->device_name, tmp + 1, sizeof(info->device_name) - 1);
+		++zeus->unique_id;
+	strncpy(info->device_name, zeus->unique_id, sizeof(info->device_name) - 1);
 	info->device_name[sizeof(info->device_name) - 1] = '\0';
 
 	info->work_timeout.tv_sec = 4294967296LL / (golden_speed_per_core * cores_per_chip * chips_count);
@@ -775,7 +798,7 @@ static struct api_data *zeus_api_stats(struct cgpu_info *zeus)
 	cgtime(&tv_now);
 	timersub(&tv_now, &(info->workstart), &tv_diff);
 
-	root = api_add_string(root, "Device Name", info->device_name, false);
+	root = api_add_string(root, "Device Name", zeus->unique_id, false);
 	khs_core = (double)info->golden_speed_per_core / 1000.;
 	khs_chip = (double)info->golden_speed_per_core * (double)info->cores_per_chip / 1000.;
 	khs_board = (double)info->golden_speed_per_core * (double)info->cores_per_chip * (double)info->chips_count / 1000.;
@@ -805,7 +828,7 @@ static struct api_data *zeus_api_stats(struct cgpu_info *zeus)
 static void zeus_get_statline_before(char *buf, size_t bufsiz, struct cgpu_info *zeus)
 {
 	struct ZEUS_INFO *info = zeus->device_data;
-	tailsprintf(buf, bufsiz, "%-9s  %4d MHz  ", info->device_name, info->chip_clk);
+	tailsprintf(buf, bufsiz, "%-10s  %4d MHz  ", zeus->name, info->chip_clk);
 }
 
 static char *zeus_set_device(struct cgpu_info *zeus, char *option, char *setting, char *replybuf)
