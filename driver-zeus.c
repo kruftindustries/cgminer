@@ -88,7 +88,7 @@ static int log_2(int value)
 	return x;
 }
 
-static uint32_t chip_index(uint32_t value, int bit_num)
+static uint32_t __maybe_unused chip_index(uint32_t value, int bit_num)
 {
 	uint32_t newvalue = 0;
 	int i;
@@ -472,8 +472,10 @@ static bool zeus_read_response(struct cgpu_info *zeus)
 
 	++info->workdone;
 
-	chip = chip_index(nonce, info->chips_bit_num);
+	//chip = chip_index(nonce, info->chips_bit_num);
 	core = (nonce & 0xe0000000) >> 29;		// core indicated by 3 highest bits
+	chip = (nonce & 0x1fffffff) / (0x1fffffff / info->chips_count);
+	info->hashes_per_ms = ((nonce & 0x1fffffff) % (0x1fffffff / info->chips_count)) * info->cores_per_chip * info->chips_count / ms_tdiff(&info->workend, &info->workstart);
 
 	if (chip < ZEUS_MAX_CHIPS && core < ZEUS_CHIP_CORES) {
 		++info->nonce_count[chip][core];
@@ -737,9 +739,12 @@ static int64_t zeus_scanwork(struct thr_info *thr)
 	old_scanwork_time = info->scanwork_time;
 	cgtime(&info->scanwork_time);
 	elapsed_s = tdiff(&info->scanwork_time, &old_scanwork_time);
-
+#if 1
+	estimate_hashes = elapsed_s * info->hashes_per_ms * 1000;
+#else
 	estimate_hashes = elapsed_s * info->golden_speed_per_core *
-						info->cores_per_chip * info->chips_count;
+				info->cores_per_chip * info->chips_count;
+#endif
 	mutex_unlock(&info->lock);
 
 	if (unlikely(estimate_hashes > 0xffffffff))
