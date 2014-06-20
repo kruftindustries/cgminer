@@ -47,6 +47,9 @@ static int opt_zeus_chips_count_max = 1;// smallest power of 2 >= opt_zeus_chips
 // Index for device-specific options
 //static int option_offset = -1;
 
+// Unset upon first hotplug check
+static bool initial_startup_phase = true;
+
 /************************************************************
  * Utility Functions
  ************************************************************/
@@ -279,11 +282,13 @@ static bool zeus_detect_one(const char *devpath)
 		opt_zeus_chips_count_max = lowest_pow2(chips_count);
 	chips_count_max = opt_zeus_chips_count_max;
 
-	applog(LOG_INFO, "Zeus Detect: Attempting to open %s", devpath);
+	if (initial_startup_phase)
+		applog(LOG_INFO, "Zeus Detect: Attempting to open %s", devpath);
 
 	fd = zeus_open_detect(devpath, baud, true);
 	if (unlikely(fd == -1)) {
-		applog(LOG_ERR, "Zeus Detect: Failed to open %s", devpath);
+		if (initial_startup_phase)
+			applog(LOG_ERR, "Zeus Detect: Failed to open %s", devpath);
 		return false;
 	}
 
@@ -665,8 +670,10 @@ static void *zeus_io_thread(void *data)
  * CGMiner Interface functions
  ************************************************************/
 
-static void zeus_detect(bool __maybe_unused hotplug)
+static void zeus_detect(bool hotplug)
 {
+	if (initial_startup_phase && hotplug)
+		initial_startup_phase = false;
 	serial_detect(&zeus_drv, zeus_detect_one);
 }
 
