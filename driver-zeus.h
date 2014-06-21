@@ -28,6 +28,7 @@
 struct ZEUS_INFO {
 	char		device_name[24];
 	int		device_fd;
+	int		using_libusb;
 
 	unsigned int	nonce_count[ZEUS_MAX_CHIPS][ZEUS_CHIP_CORES];
 	unsigned int	error_count[ZEUS_MAX_CHIPS][ZEUS_CHIP_CORES];

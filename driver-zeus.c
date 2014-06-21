@@ -41,6 +41,9 @@
 #include "util.h"
 #include "driver-zeus.h"
 
+#define using_libusb(info) ((info)->using_libusb > 0)
+#define using_serial(info) ((info)->using_libusb == 0)
+
 // Configuration options
 extern bool opt_zeus_debug;
 extern int opt_zeus_chips_count;		// number of Zeus chips chained together
@@ -145,20 +148,22 @@ static void notify_io_thread(struct cgpu_info *zeus)
  * I/O helper functions
  ************************************************************/
 
-#define zeus_open_detect(devpath, baud, purge) serial_open_ex(devpath, baud, ZEUS_READ_FAULT_DECISECONDS, 0, purge)
-#define zeus_open(devpath, baud, purge) serial_open_ex(devpath, baud, ZEUS_READ_FAULT_DECISECONDS, 1, purge)
-#define zeus_close(fd) close(fd)
+#define zeus_serial_open_detect(devpath, baud, purge) serial_open_ex(devpath, baud, ZEUS_READ_FAULT_DECISECONDS, 0, purge)
+#define zeus_serial_open(devpath, baud, purge) serial_open_ex(devpath, baud, ZEUS_READ_FAULT_DECISECONDS, 1, purge)
+#define zeus_serial_close(fd) close(fd)
 
-#ifndef ZEUS_USE_LIBUSB
 static bool zeus_reopen(struct cgpu_info *zeus)
 {
 	struct ZEUS_INFO *info = zeus->device_data;
 	int fd;
 
+	if (using_libusb(info))		// with libusb let hotplog take care of reopening
+		return false;
+
 	if (info->device_fd != -1) {
 		applog(LOG_DEBUG, "Closing %s%d on %s (fd=%d)",
 			zeus->drv->name, zeus->device_id, zeus->device_path, info->device_fd);
-		zeus_close(info->device_fd);
+		zeus_serial_close(info->device_fd);
 		info->device_fd = -1;
 		cgsleep_ms(500);
 	}
@@ -166,7 +171,7 @@ static bool zeus_reopen(struct cgpu_info *zeus)
 	applog(LOG_DEBUG, "Attempting to open %s%d on %s",
 		zeus->drv->name, zeus->device_id, zeus->device_path);
 
-	fd = zeus_open(zeus->device_path, info->baud, true);
+	fd = zeus_serial_open(zeus->device_path, info->baud, true);
 	if (unlikely(fd < 0)) {
 		applog(LOG_ERR, "Failed to open %s%d on %s",
 			zeus->drv->name, zeus->device_id, zeus->device_path);
@@ -180,13 +185,8 @@ static bool zeus_reopen(struct cgpu_info *zeus)
 
 	return true;
 }
-#else
-static bool zeus_reopen(struct cgpu_info __maybe_unused *zeus) {
-	return false;
-}
-#endif
 
-static int zeus_write(int fd, const void *buf, size_t len)
+static int zeus_serial_write(int fd, const void *buf, size_t len)
 {
 	ssize_t ret;
 	size_t total = 0;
@@ -203,7 +203,7 @@ static int zeus_write(int fd, const void *buf, size_t len)
 	while (total < len) {
 		ret = write(fd, buf, len);
 		if (ret < 0) {
-			applog(LOG_ERR, "zeus_write (%d): error on write: %s", fd, strerror(errno));
+			applog(LOG_ERR, "zeus_serial_write (%d): error on write: %s", fd, strerror(errno));
 			return -1;
 		}
 		total += (size_t)ret;
@@ -212,7 +212,7 @@ static int zeus_write(int fd, const void *buf, size_t len)
 	return total;
 }
 
-static int zeus_read(int fd, void *buf, size_t len, int read_count, struct timeval *tv_firstbyte)
+static int zeus_serial_read(int fd, void *buf, size_t len, int read_count, struct timeval *tv_firstbyte)
 {
 	ssize_t ret;
 	size_t total = 0;
@@ -221,14 +221,14 @@ static int zeus_read(int fd, void *buf, size_t len, int read_count, struct timev
 	while (total < len) {
 		ret = read(fd, buf + total, len - total);
 		if (ret < 0) {
-			applog(LOG_ERR, "zeus_read (%d): error on read: %s", fd, strerror(errno));
+			applog(LOG_ERR, "zeus_serial_read (%d): error on read: %s", fd, strerror(errno));
 			return -1;
 		}
 
 		if (tv_firstbyte != NULL && total == 0)
 			cgtime(tv_firstbyte);
 
-		applog(LOG_DEBUG, "zeus_read: read returned %d", (int)ret);
+		applog(LOG_DEBUG, "zeus_serial_read: read returned %d", (int)ret);
 
 		if (ret == 0 && ++rc >= read_count)
 			break;
@@ -309,14 +309,11 @@ static int zeus_usb_control_transfer(struct cgpu_info *zeus, uint8_t request_typ
 static bool zeus_initialize_usbuart(struct cgpu_info *zeus)
 {
 	int interface = usb_interface(zeus);
-	uint32_t data = CP210X_DATA_BAUD;
+	//uint32_t baudrate = CP210X_DATA_BAUD;
 
 	// Enable the UART
 	if (zeus_usb_control_transfer(zeus, CP210X_TYPE_OUT, CP210X_REQUEST_IFC_ENABLE,
 			CP210X_VALUE_UART_ENABLE, interface, NULL, 0, C_ENABLE_UART))
-		return false;
-
-	if (zeus->usbinfo.nodev)
 		return false;
 
 	// Set data control
@@ -324,12 +321,10 @@ static bool zeus_initialize_usbuart(struct cgpu_info *zeus)
 			CP210X_VALUE_DATA, interface, NULL, 0, C_SETDATA))
 		return false;
 
-	if (zeus->usbinfo.nodev)
-		return false;
-
+	// Zeusminers have baud hardcoded to 115200, and reject baud commands, even to same value
 	// Set the baud
 	//if (zeus_usb_control_transfer(zeus, CP210X_TYPE_OUT, CP210X_REQUEST_BAUD,
-	//		0, interface, &data, sizeof(data), C_SETBAUD))
+	//		0, interface, &baudrate, sizeof(baudrate), C_SETBAUD))
 	//	return false;
 
 	return true;
@@ -352,6 +347,7 @@ static struct cgpu_info *zeus_detect_one_usb(struct libusb_device *dev, struct u
 	zeus->threads = 1;
 
 	info->device_fd = -1;
+	info->using_libusb = 1;
 	zeus->unique_id = zeus->device_path;
 	strncpy(info->device_name, zeus->unique_id, sizeof(info->device_name) - 1);
 	info->device_name[sizeof(info->device_name) - 1] = '\0';
@@ -433,7 +429,7 @@ static bool zeus_detect_one_serial(const char *devpath)
 
 	applog(LOG_INFO, "Zeus Detect: Attempting to open %s", devpath);
 
-	fd = zeus_open_detect(devpath, baud, true);
+	fd = zeus_serial_open_detect(devpath, baud, true);
 	if (unlikely(fd == -1)) {
 		applog(LOG_ERR, "Zeus Detect: Failed to open %s", devpath);
 		return false;
@@ -455,7 +451,7 @@ static bool zeus_detect_one_serial(const char *devpath)
 	ob_bin[2] = 0x00;
 	ob_bin[3] = 0x01;
 	for (i = 0; i < 2; ++i) {
-		zeus_write(fd, ob_bin, sizeof(ob_bin));
+		zeus_serial_write(fd, ob_bin, sizeof(ob_bin));
 		cgsleep_ms(500);	// what is the minimum the miners need/will accept?
 		flush_uart(fd);
 	}
@@ -466,7 +462,7 @@ static bool zeus_detect_one_serial(const char *devpath)
 	ob_bin[2] = 0x00;
 	ob_bin[3] = 0x01;
 	for (i = 0; i < 2; ++i) {
-		zeus_write(fd, ob_bin, sizeof(ob_bin));
+		zeus_serial_write(fd, ob_bin, sizeof(ob_bin));
 		cgsleep_ms(500);
 		flush_uart(fd);
 	}
@@ -481,13 +477,13 @@ static bool zeus_detect_one_serial(const char *devpath)
 		ob_bin[3] = 0x01;
 
 		for (i = 0; i < 2; ++i) {
-			zeus_write(fd, ob_bin, sizeof(ob_bin));
+			zeus_serial_write(fd, ob_bin, sizeof(ob_bin));
 			cgtime(&tv_start);
-			if (zeus_read(fd, nonce_bin, sizeof(nonce_bin), 25, &tv_finish) == sizeof(nonce_bin))
+			if (zeus_serial_read(fd, nonce_bin, sizeof(nonce_bin), 25, &tv_finish) == sizeof(nonce_bin))
 				break;
 		}
 
-		zeus_close(fd);
+		zeus_serial_close(fd);
 
 		memcpy(&nonce, nonce_bin, sizeof(nonce_bin));
 		nonce = be32toh(nonce);
@@ -505,7 +501,7 @@ static bool zeus_detect_one_serial(const char *devpath)
 			applog(LOG_INFO, "Test succeeded at %s: got %08x",
 					devpath, nonce);
 	} else {
-		zeus_close(fd);
+		zeus_serial_close(fd);
 		golden_speed_per_core = (((chip_clk * 2.) / 3.) * 1024.) / 8.;
 	}
 
@@ -534,6 +530,7 @@ static bool zeus_detect_one_serial(const char *devpath)
 			zeus->device_id, baud, cores_per_chip, chips_count);
 
 	info->device_fd = -1;
+	info->using_libusb = 0;
 	zeus->unique_id = strrchr(zeus->device_path, '/');
 	if (zeus->unique_id == NULL)
 		zeus->unique_id = zeus->device_path;
@@ -587,16 +584,16 @@ static bool zeus_read_response(struct cgpu_info *zeus)
 	uint32_t nonce, chip, core;
 	bool valid;
 
-#ifdef ZEUS_USE_LIBUSB
-	ret = read(info->zm_pipefd[PIPE_R], evtpkt, sizeof(evtpkt));
-	if (ret <= 0)
-		return false;
-#else
-	ret = zeus_read(zeus, evtpkt, sizeof(evtpkt), 1, NULL);
-	if (ret <= 0)
-		return false;
-	flush_uart(info->device_fd);
-#endif
+	if (using_libusb(info)) {	// in libusb mode data comes to us via the inter-thread pipe
+		ret = read(info->zm_pipefd[PIPE_R], evtpkt, sizeof(evtpkt));
+		if (ret <= 0)
+			return false;
+	} else {			// in serial mode we read directly
+		ret = zeus_serial_read(info->device_fd, evtpkt, sizeof(evtpkt), 1, NULL);
+		if (ret <= 0)
+			return false;
+		flush_uart(info->device_fd);
+	}
 
 	memcpy(&nonce, evtpkt, sizeof(evtpkt));
 	nonce = be32toh(nonce);
@@ -683,15 +680,15 @@ static bool zeus_send_work(struct cgpu_info *zeus, struct work *work)
 	memcpy(cmdpkt + 4, work->data, 80);
 	rev(cmdpkt + 4, 80);
 
-#ifdef ZEUS_USE_LIBUSB
-	if (usb_write(zeus, (char *)cmdpkt, sizeof(cmdpkt), &ret, C_SENDWORK) != LIBUSB_SUCCESS ||
-		ret != sizeof(cmdpkt))
-		return false;
-#else
-	ret = zeus_write(zeus, cmdpkt, sizeof(cmdpkt));
-	if (ret < 0)
-		return false;
-#endif
+	if (using_libusb(info)) {	// in libusb mode we send via usb ;)
+		if (usb_write(zeus, (char *)cmdpkt, sizeof(cmdpkt), &ret, C_SENDWORK) != LIBUSB_SUCCESS ||
+			ret != sizeof(cmdpkt))
+			return false;
+	} else {			// otherwise direct via serial port
+		ret = zeus_serial_write(info->device_fd, cmdpkt, sizeof(cmdpkt));
+		if (ret < 0)
+			return false;
+	}
 
 	return true;
 }
@@ -704,17 +701,16 @@ static void *zeus_io_thread(void *data)
 	struct pollfd pfds[2];
 	struct timeval tv_now, tv_spent, tv_rem;
 	int retval;
+	bool reopen_device = (using_serial(info) && info->device_fd == -1) ? true : false;
 
 	snprintf(threadname, sizeof(threadname), "Zeus/%d", zeus->device_id);
 	RenameThread(threadname);
 	applog(LOG_INFO, "%s%d: serial I/O thread running, %s",
 						zeus->drv->name, zeus->device_id, threadname);
 
-#ifdef ZEUS_USE_LIBUSB
-	pfds[0].fd = info->zm_pipefd[PIPE_R];
-#else
-	// pfds[0].fd set in loop
-#endif
+	if (using_libusb(info))	// in libusb mode get nonces from another thread via pipe
+		pfds[0].fd = info->zm_pipefd[PIPE_R];
+				// in serial mode pfds[0].fd is set in the while loop
 	pfds[0].events = POLLIN;
 	pfds[0].revents = 0;
 	pfds[1].fd = info->wu_pipefd[PIPE_R];
@@ -722,23 +718,25 @@ static void *zeus_io_thread(void *data)
 	pfds[1].revents = 0;
 
 	while (likely(!zeus->shutdown)) {
-#ifndef ZEUS_USE_LIBUSB
 		mutex_lock(&info->lock);
-		if (info->device_fd == -1 && !zeus_reopen(zeus)) {
-			applog(LOG_ERR, "Failed to reopen %s%d on %s, shutting down",
-				zeus->drv->name, zeus->device_id, zeus->device_path);
-			zeus->shutdown = true;
-			mutex_unlock(&info->lock);
-			break;
+		if (unlikely(reopen_device)) {
+			if (!zeus_reopen(zeus)) {
+				applog(LOG_ERR, "Failed to reopen %s%d on %s, shutting down",
+					zeus->drv->name, zeus->device_id, zeus->device_path);
+				mutex_unlock(&info->lock);
+				break;
+			}
+			zeus_purge_work(zeus);
+			reopen_device = false;
 		}
-		pfds[0].fd = info->device_fd;
+		if (using_serial(info))
+			pfds[0].fd = info->device_fd;
 		mutex_unlock(&info->lock);
-#endif
 
 		zeus_check_need_work(zeus);
 
 		mutex_lock(&info->lock);
-		if (info->current_work != NULL && !info->current_work->devflag) {
+		if (info->current_work && !info->current_work->devflag) {
 			/* send task to device */
 			if (opt_zeus_debug)
 				applog(LOG_INFO, "Sending work");
@@ -754,11 +752,7 @@ static void *zeus_io_thread(void *data)
 				mutex_unlock(&info->lock);
 				applog(LOG_NOTICE, "%s%d: I/O error while sending work, will attempt to reopen device",
 					zeus->drv->name, zeus->device_id);
-				zeus_purge_work(zeus);
-#ifndef ZEUS_USE_LIBUSB
-				zeus_close(info->device_fd);
-				info->device_fd = -1;
-#endif
+				reopen_device = true;
 				continue;
 			}
 		}
@@ -779,29 +773,23 @@ static void *zeus_io_thread(void *data)
 		if (retval < 0) {				// error
 			if (errno == EINTR)
 				continue;
-
-			applog(LOG_NOTICE, "%s%d: Error on poll (fd=%d): %s",
-				zeus->drv->name, zeus->device_id, info->device_fd, strerror(errno));
-
-			zeus->shutdown = true;
+			applog(LOG_NOTICE, "%s%d: Error on poll: %s, shutting down",
+				zeus->drv->name, zeus->device_id, strerror(errno));
 			break;
 		} else if (retval > 0) {
-			if (pfds[0].revents & (POLLERR | POLLNVAL)) {
+			if (pfds[0].revents & (POLLERR | POLLNVAL)) {	// low level I/O error (usually hardware)
 				pfds[0].revents = 0;
 				if (opt_zeus_debug) {
 					if (pfds[0].revents & POLLNVAL)
-						applog(LOG_DEBUG, "Device FD %d closed unexpectedly", pfds[0].fd);
+						applog(LOG_DEBUG, "%s%d: Device file descriptor %d invalid",
+						       zeus->drv->name, zeus->device_id, pfds[0].fd);
 					else
-						applog(LOG_DEBUG, "Error on file descriptor %d", pfds[0].fd);
+						applog(LOG_DEBUG, "%s%d: Error on file descriptor %d",
+						       zeus->drv->name, zeus->device_id, pfds[0].fd);
 				}
 
-				if (zeus_reopen(zeus))
-					continue;
-
-				applog(LOG_ERR, "Failed to reopen %s%d on %s, shutting down",
-					zeus->drv->name, zeus->device_id, zeus->device_path);
-				zeus->shutdown = true;
-				break;
+				reopen_device = true;
+				continue;
 			}
 
 			if (pfds[0].revents & POLLIN) {		// event packet
@@ -811,11 +799,7 @@ static void *zeus_io_thread(void *data)
 				if (!zeus_read_response(zeus)) {
 					applog(LOG_NOTICE, "%s%d: I/O error while reading response, will attempt to reopen device",
 						zeus->drv->name, zeus->device_id);
-					zeus_purge_work(zeus);
-#ifndef ZEUS_USE_LIBUSB
-					zeus_close(info->device_fd);
-					info->device_fd = -1;
-#endif
+					reopen_device = true;
 				}
 				mutex_unlock(&info->lock);
 			}
@@ -823,10 +807,10 @@ static void *zeus_io_thread(void *data)
 			if (pfds[1].revents & POLLIN) {		// miner thread woke us up
 				pfds[1].revents = 0;
 				if (!flush_fd(info->wu_pipefd[PIPE_R])) {
-					// this should never happen
+					// this should never happen, only here in case
+					// an internal error causes pipe to be closed
 					applog(LOG_ERR, "%s%d: Inter-thread pipe closed, miner thread dead?",
 							zeus->drv->name, zeus->device_id);
-					zeus->shutdown = true;
 					break;
 				}
 			}
@@ -840,6 +824,7 @@ static void *zeus_io_thread(void *data)
 			applog(LOG_DEBUG, "poll returned %d", retval);
 	}
 
+	zeus->shutdown = true;
 	return NULL;
 }
 
@@ -847,18 +832,17 @@ static void *zeus_io_thread(void *data)
  * CGMiner Interface functions
  ************************************************************/
 
-static int __maybe_unused zeus_autoscan()
+static int zeus_autoscan()
 {
 	return serial_autodetect_udev(zeus_detect_one_serial, ZEUS_USB_ID_MODEL_STR);
 }
 
 static void zeus_detect(bool __maybe_unused hotplug)
 {
-#ifdef ZEUS_USE_LIBUSB
-	usb_detect(&zeus_drv, zeus_detect_one_usb);
-#else
-	serial_detect_auto(&zeus_drv, zeus_detect_one_serial, zeus_autoscan);
-#endif
+	int found = 0;
+	found = serial_detect_auto(&zeus_drv, zeus_detect_one_serial, zeus_autoscan);
+	if (found == 0)
+		usb_detect(&zeus_drv, zeus_detect_one_usb);
 }
 
 static bool zeus_prepare(struct thr_info *thr)
@@ -871,11 +855,19 @@ static bool zeus_prepare(struct thr_info *thr)
 
 	info->thr = thr;
 	mutex_init(&info->lock);
-	if (pipe(info->wu_pipefd) < 0 || pipe(info->zm_pipefd) < 0) {
+
+	if (pipe(info->wu_pipefd) < 0) {
 		applog(LOG_ERR, "zeus_prepare: error on pipe: %s", strerror(errno));
 		return false;
 	}
-	//fcntl(info->wu_pipefd[PIPE_R], F_SETFL, O_NONBLOCK);
+
+	if (using_libusb(info) && pipe(info->zm_pipefd) < 0) {
+		applog(LOG_ERR, "zeus_prepare: error on pipe: %s", strerror(errno));
+		return false;
+	} else {
+		info->zm_pipefd[PIPE_R] = -1;	// makes debugging easier by causing
+		info->zm_pipefd[PIPE_W] = -1;	// obvious error messages
+	}
 
 	return true;
 }
@@ -899,24 +891,27 @@ static int64_t zeus_scanwork(struct thr_info *thr)
 	struct cgpu_info *zeus = thr->cgpu;
 	struct ZEUS_INFO *info = zeus->device_data;
 	struct timeval old_scanwork_time;
+	unsigned char evtpkt[ZEUS_EVENT_PKT_LEN];
+	int err, ret;
 	double elapsed_s;
 	int64_t estimate_hashes;
 
-#ifdef ZEUS_USE_LIBUSB
-	unsigned char evtpkt[ZEUS_EVENT_PKT_LEN];
-	int err, ret;
-
-	err = usb_read_timeout(zeus, (char *)evtpkt, sizeof(evtpkt), &ret, 250, C_GETRESULTS);
-	if (err && err != LIBUSB_ERROR_TIMEOUT) {
-		applog(LOG_ERR, "%s%d: USB read error: %s",
-			zeus->drv->name, zeus->device_id, libusb_error_name(err));
-		close(info->zm_pipefd[PIPE_W]);
+	/* in libusb mode, we use this opportunity to check if the miner has a
+	 * new nonce value for us; if so we relay it to the I/O thread via pipe */
+	if (using_libusb(info)) {
+		err = usb_read_timeout(zeus, (char *)evtpkt, sizeof(evtpkt), &ret, 250, C_GETRESULTS);
+		if (err && err != LIBUSB_ERROR_TIMEOUT) {
+			applog(LOG_ERR, "%s%d: USB read error: %s",
+				zeus->drv->name, zeus->device_id, libusb_error_name(err));
+			close(info->zm_pipefd[PIPE_W]);  // this will cause the I/O thread to shutdown also
+		}
+		if (ret == sizeof(evtpkt))
+			write(info->zm_pipefd[PIPE_W], evtpkt, sizeof(evtpkt));
+	} else {
+		/* in serial mode we have nothing to so, so sleep for a bit
+		 * to prevent this from becoming a busy-loop */
+		cgsleep_ms(100);
 	}
-	if (ret == sizeof(evtpkt))
-		write(info->zm_pipefd[PIPE_W], evtpkt, sizeof(evtpkt));
-#else
-	cgsleep_ms(100);
-#endif
 
 	mutex_lock(&info->lock);
 	old_scanwork_time = info->scanwork_time;
@@ -1056,15 +1051,16 @@ static void zeus_shutdown(struct thr_info *thr)
 	mutex_destroy(&info->lock);
 	close(info->wu_pipefd[PIPE_R]);
 	close(info->wu_pipefd[PIPE_W]);
-	close(info->zm_pipefd[PIPE_R]);
-	close(info->zm_pipefd[PIPE_W]);
 
-#ifndef ZEUS_USE_LIBUSB
+	if (using_libusb(info)) {
+		close(info->zm_pipefd[PIPE_R]);
+		close(info->zm_pipefd[PIPE_W]);
+	}
+
 	if (info->device_fd != -1) {
-		zeus_close(info->device_fd);
+		zeus_serial_close(info->device_fd);
 		info->device_fd = -1;
 	}
-#endif
 }
 
 struct device_drv zeus_drv = {
