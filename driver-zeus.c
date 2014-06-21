@@ -328,9 +328,9 @@ static bool zeus_initialize_usbuart(struct cgpu_info *zeus)
 		return false;
 
 	// Set the baud
-	if (zeus_usb_control_transfer(zeus, CP210X_TYPE_OUT, CP210X_REQUEST_BAUD,
-			0, interface, &data, sizeof(data), C_SETBAUD))
-		return false;
+	//if (zeus_usb_control_transfer(zeus, CP210X_TYPE_OUT, CP210X_REQUEST_BAUD,
+	//		0, interface, &data, sizeof(data), C_SETBAUD))
+	//	return false;
 
 	return true;
 }
