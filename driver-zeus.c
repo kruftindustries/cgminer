@@ -139,30 +139,36 @@ static void notify_io_thread(struct cgpu_info *zeus)
 static bool zeus_reopen(struct cgpu_info *zeus)
 {
 	struct ZEUS_INFO *info = zeus->device_data;
-	int fd;
+	int try, fd = -1;
 
 	if (info->device_fd != -1) {
 		applog(LOG_DEBUG, "Closing %s%d on %s (fd=%d)",
 			zeus->drv->name, zeus->device_id, zeus->device_path, info->device_fd);
 		zeus_close(info->device_fd);
 		info->device_fd = -1;
-		cgsleep_ms(500);
+		cgsleep_ms(2000);
 	}
 
 	applog(LOG_DEBUG, "Attempting to open %s%d on %s",
 		zeus->drv->name, zeus->device_id, zeus->device_path);
 
-	fd = zeus_open(zeus->device_path, info->baud, true);
+	for (try = 0; try < 3; ++try) {
+		fd = zeus_open(zeus->device_path, info->baud, true);
+		if (likely(fd > -1))
+			break;
+		cgsleep_ms(3000);
+	}
+
 	if (unlikely(fd < 0)) {
-		applog(LOG_ERR, "Failed to open %s%d on %s",
-			zeus->drv->name, zeus->device_id, zeus->device_path);
+		applog(LOG_ERR, "Failed to open %s%d on %s (%d attempts)",
+			zeus->drv->name, zeus->device_id, zeus->device_path, try);
 		return false;
 	}
 
 	info->device_fd = fd;
 
-	applog(LOG_DEBUG, "Successfully opened %s%d on %s (fd=%d)",
-		zeus->drv->name, zeus->device_id, zeus->device_path, info->device_fd);
+	applog(LOG_DEBUG, "Successfully opened %s%d on %s (%d attempts, fd=%d)",
+		zeus->drv->name, zeus->device_id, zeus->device_path, try, info->device_fd);
 
 	return true;
 }
