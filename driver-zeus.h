@@ -6,19 +6,21 @@
 #define ZEUS_PROTOCOL_DEBUG 1
 
 #define ZEUS_CHIP_GEN			1
-#define ZEUS_CHIP_GEN1_CORES	8
+#define ZEUS_CHIP_GEN1_CORES		8
 #define ZEUS_CHIP_CORES			ZEUS_CHIP_GEN1_CORES
 #define ZEUS_MAX_CHIPS			1024
 
-#define ZEUS_IO_SPEED	115200
+#define ZEUS_IO_SPEED			115200
 
-#define ZEUS_READ_FAULT_DECISECONDS 2
+#define ZEUS_READ_FAULT_DECISECONDS	2
 
-#define ZEUS_COMMAND_PKT_LEN	84
+#define ZEUS_COMMAND_PKT_LEN		84
 #define ZEUS_EVENT_PKT_LEN		4
 
-#define ZEUS_CLK_MAX	382		// 0xff * 3/2
-#define ZEUS_CLK_MIN	2
+#define ZEUS_CLK_MAX			382	// 0xff * 3/2
+#define ZEUS_CLK_MIN			2
+
+#define ZEUS_USB_ID_MODEL_STR		"CP2102_USB_to_UART_Bridge_Controller"
 
 #define PIPE_R 0
 #define PIPE_W 1
@@ -26,6 +28,7 @@
 struct ZEUS_INFO {
 	char		device_name[24];
 	int		device_fd;
+	int		using_libusb;
 
 	unsigned int	nonce_count[ZEUS_MAX_CHIPS][ZEUS_CHIP_CORES];
 	unsigned int	error_count[ZEUS_MAX_CHIPS][ZEUS_CHIP_CORES];
@@ -46,7 +49,8 @@ struct ZEUS_INFO {
 	struct thr_info	*thr;
 	pthread_t	pth_io;
 	pthread_mutex_t	lock;
-	int		pipefd[2];
+	int		wu_pipefd[2];		// inter-thread pipe from miner on work flush
+	int		zm_pipefd[2];		// inter-thread pipe from device I/O thread
 
 	struct work	*current_work;
 

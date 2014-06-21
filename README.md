@@ -15,19 +15,41 @@ Scrypt algorithm code was ported from CGMiner version 3.7.2.
 
 The Zeus driver needs to be configured with two runtime options: the number of
 chips per ASIC device with `--zeus-chips` and the desired clock speed in MHz
-with `--zeus-clock`. Also, since autodetection is currently not implemented,
-attached devices must be specified using `--scan-serial`. Example:
+with `--zeus-clock`. These options are global. There is currently no provision
+(yet) to specify these on a per-device basis.
 
-	./cgminer --scrypt --scan-serial /dev/ttyUSB0 --zeus-chips 96 --zeus-clock 328
+With no `--scan-serial` options the driver will use libusb to autodetect any
+connected miners and to perform all device I/O operations. This is the
+recommended method if multiple drivers are compiled into cgminer.
+If `--scan-serial zeus:auto` is specified, the driver will use libudev to
+identify which USB-serial ports (if any) are from a Zeus miner and open those
+ports directly. All I/O will be done using direct serial reads and writes
+(not through libusb). This method may not work properly if multiple drivers
+are enabled.
+As a fallback should autodetection not work, individual devices can be specified
+manually using `--scan-serial zeus:/dev/ttyX` (note the "zeus:" is optional if
+only the Zeus driver has been compiled in).
+The following three examples are equivalent assuming three miners are connected:
 
-It is currently not possible to specify different chip counts or clock rates per device.
+	# Using libusb
+	./cgminer --scrypt --zeus-chips 96 --zeus-clock 328
+	
+	# Direct serial I/O, auto-detect ports
+	./cgminer --scrypt --zeus-chips 96 --zeus-clock 328 --scan-serial zeus:auto
+	
+	# Direct serial I/O, manual port specification
+	./cgminer --scrypt --zeus-chips 96 --zeus-clock 328 --scan-serial /dev/ttyUSB0 \
+		--scan-serial /dev/ttyUSB1 --scan-serial /dev/ttyUSB2
+
+The reason for the multitude of options is for backward compatibility as well
+as testing and in case auto-detection fails.
 
 Chip count for different models: Blizzard: 6, Cyclone: 96
 
-Zeus driver is based on [documentation][zeus-doc] and the official reference implementation.
-Thanks also to sling00 for providing access to test hardware.
+Zeus driver is based on [documentation][zeus_doc] and the official reference implementation.
+Many thanks also to sling00 and LinuxETC for providing access to test hardware.
 
-[zeus-doc] : <http://zeusminer.com/user-manual-ver-1-0/>
+[zeus_doc] : <http://zeusminer.com/user-manual-ver-1-0/>
 
 ## Gridseed ##
 
