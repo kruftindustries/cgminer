@@ -841,7 +841,12 @@ static int zeus_autoscan()
 
 static void zeus_detect(bool __maybe_unused hotplug)
 {
-	if (list_empty(&scan_devices))
+	static int serial_usb = 0;
+
+	if (serial_usb == 0)
+		serial_usb = (list_empty(&scan_devices)) ? -1 : 1;
+
+	if (serial_usb < 0)
 		usb_detect(&zeus_drv, zeus_detect_one_usb);
 	else
 		serial_detect_auto(&zeus_drv, zeus_detect_one_serial, zeus_autoscan);
