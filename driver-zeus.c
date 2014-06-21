@@ -131,7 +131,7 @@ static void notify_io_thread(struct cgpu_info *zeus)
 {
 	struct ZEUS_INFO *info = zeus->device_data;
 	static char tickle = 'W';
-	write(info->pipefd[PIPE_W], &tickle, 1);
+	(void)write(info->pipefd[PIPE_W], &tickle, 1);
 }
 
 /************************************************************
