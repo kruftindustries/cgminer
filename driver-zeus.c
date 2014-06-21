@@ -583,7 +583,7 @@ static bool zeus_read_response(struct cgpu_info *zeus)
 {
 	struct ZEUS_INFO *info = zeus->device_data;
 	unsigned char evtpkt[ZEUS_EVENT_PKT_LEN];
-	int ret;
+	int ret, duration_ms;
 	uint32_t nonce, chip, core;
 	bool valid;
 
@@ -617,7 +617,9 @@ static bool zeus_read_response(struct cgpu_info *zeus)
 	//chip = chip_index(nonce, info->chips_bit_num);
 	core = (nonce & 0xe0000000) >> 29;		// core indicated by 3 highest bits
 	chip = (nonce & 0x1fffffff) / (0x1fffffff / info->chips_count);
-	info->hashes_per_ms = ((nonce & 0x1fffffff) % (0x1fffffff / info->chips_count)) * info->cores_per_chip * info->chips_count / ms_tdiff(&info->workend, &info->workstart);
+	duration_ms = ms_tdiff(&info->workend, &info->workstart);
+	if (duration_ms > 0)
+		info->hashes_per_ms = ((nonce & 0x1fffffff) % (0x1fffffff / info->chips_count)) * info->cores_per_chip * info->chips_count / duration_ms;
 
 	if (chip < ZEUS_MAX_CHIPS && core < ZEUS_CHIP_CORES) {
 		++info->nonce_count[chip][core];
@@ -920,7 +922,7 @@ static int64_t zeus_scanwork(struct thr_info *thr)
 	old_scanwork_time = info->scanwork_time;
 	cgtime(&info->scanwork_time);
 	elapsed_s = tdiff(&info->scanwork_time, &old_scanwork_time);
-#if 1
+#if 0
 	estimate_hashes = elapsed_s * info->hashes_per_ms * 1000;
 #else
 	estimate_hashes = elapsed_s * info->golden_speed_per_core *
@@ -978,6 +980,7 @@ static struct api_data *zeus_api_stats(struct cgpu_info *zeus)
 		root = api_add_int(root, "chips_count_max", &(info->chips_count_max), false);
 		root = api_add_int(root, "chips_bit_num", &(info->chips_bit_num), false);
 		root = api_add_uint32(root, "read_count", &(info->read_count), false);
+		root = api_add_uint32(root, "hashes_per_ms", &(info->hashes_per_ms), false);
 	}
 
 	return root;
