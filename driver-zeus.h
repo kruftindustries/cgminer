@@ -48,7 +48,8 @@ struct ZEUS_INFO {
 	struct thr_info	*thr;
 	pthread_t	pth_io;
 	pthread_mutex_t	lock;
-	int		pipefd[2];
+	int		wu_pipefd[2];		// inter-thread pipe from miner on work flush
+	int		zm_pipefd[2];		// inter-thread pipe from device I/O thread
 
 	struct work	*current_work;
 
