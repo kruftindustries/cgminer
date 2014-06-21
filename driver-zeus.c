@@ -292,6 +292,13 @@ static bool zeus_detect_one(const char *devpath)
 	uint32_t nonce;
 	uint64_t golden_speed_per_core;
 
+	/* this check here is needed as a failsafe because the serial_detect
+	 * functions do not keep track of devices already opened */
+	for (i = 0; i < total_devices; ++i) {
+		if (devices[i]->device_path && !strcasecmp(devices[i]->device_path, devpath))
+			return false;
+	}
+
 	uint32_t golden_nonce_val = be32toh(0x268d0300); // 0xd26 = 3366
 	unsigned char ob_bin[ZEUS_COMMAND_PKT_LEN], nonce_bin[ZEUS_EVENT_PKT_LEN];
 
