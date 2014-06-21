@@ -617,6 +617,7 @@ static bool zeus_read_response(struct cgpu_info *zeus)
 	duration_ms = ms_tdiff(&info->workend, &info->workstart);
 	if (duration_ms > 0)
 		info->hashes_per_ms = ((nonce & 0x1fffffff) % (0x1fffffff / info->chips_count)) * info->cores_per_chip * info->chips_count / duration_ms;
+	info->last_nonce = nonce;
 
 	if (chip < ZEUS_MAX_CHIPS && core < ZEUS_CHIP_CORES) {
 		++info->nonce_count[chip][core];
@@ -975,7 +976,9 @@ static struct api_data *zeus_api_stats(struct cgpu_info *zeus)
 		root = api_add_int(root, "chips_count_max", &(info->chips_count_max), false);
 		root = api_add_int(root, "chips_bit_num", &(info->chips_bit_num), false);
 		root = api_add_uint32(root, "read_count", &(info->read_count), false);
+
 		root = api_add_uint32(root, "hashes_per_ms", &(info->hashes_per_ms), false);
+		root = api_add_uint32(root, "last_nonce", &(info->last_nonce), false);
 	}
 
 	return root;
