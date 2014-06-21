@@ -38,6 +38,7 @@
   #include "usbutils.h"
 #endif
 #include "fpgautils.h"
+#include "elist.h"
 #include "util.h"
 #include "driver-zeus.h"
 
@@ -840,10 +841,10 @@ static int zeus_autoscan()
 
 static void zeus_detect(bool __maybe_unused hotplug)
 {
-	int found = 0;
-	found = serial_detect_auto(&zeus_drv, zeus_detect_one_serial, zeus_autoscan);
-	if (found == 0)
+	if (list_empty(&scan_devices))
 		usb_detect(&zeus_drv, zeus_detect_one_usb);
+	else
+		serial_detect_auto(&zeus_drv, zeus_detect_one_serial, zeus_autoscan);
 }
 
 static bool zeus_prepare(struct thr_info *thr)
@@ -857,17 +858,9 @@ static bool zeus_prepare(struct thr_info *thr)
 	info->thr = thr;
 	mutex_init(&info->lock);
 
-	if (pipe(info->wu_pipefd) < 0) {
+	if (pipe(info->wu_pipefd) < 0 || (using_libusb(info) && pipe(info->zm_pipefd) < 0)) {
 		applog(LOG_ERR, "zeus_prepare: error on pipe: %s", strerror(errno));
 		return false;
-	}
-
-	if (using_libusb(info) && pipe(info->zm_pipefd) < 0) {
-		applog(LOG_ERR, "zeus_prepare: error on pipe: %s", strerror(errno));
-		return false;
-	} else {
-		info->zm_pipefd[PIPE_R] = -1;	// makes debugging easier by causing
-		info->zm_pipefd[PIPE_W] = -1;	// obvious error messages
 	}
 
 	return true;
