@@ -73,6 +73,7 @@ static cgtimer_t usb11_cgt;
 #define COINTERRA_TIMEOUT_MS 999
 #define HASHFAST_TIMEOUT_MS 999
 #define GRIDSEED_TIMEOUT_MS 999
+#define ZEUS_TIMEOUT_MS 999
 
 /* The safety timeout we use, cancelling async transfers on windows that fail
  * to timeout on their own. */
@@ -87,6 +88,7 @@ static cgtimer_t usb11_cgt;
 #define COINTERRA_TIMEOUT_MS 200
 #define HASHFAST_TIMEOUT_MS 500
 #define GRIDSEED_TIMEOUT_MS 200
+#define ZEUS_TIMEOUT_MS 200
 #endif
 
 #define USB_EPS(_intx, _epinfosx) { \
@@ -396,6 +398,17 @@ static struct usb_epinfo gsd3_epinfos[] = {
 
 static struct usb_intinfo gsd3_ints[] = {
 	USB_EPS(0, gsd3_epinfos)
+};
+#endif
+
+#ifdef USE_ZEUS
+static struct usb_epinfo zus_epinfos[] = {
+	{ LIBUSB_TRANSFER_TYPE_BULK,	64,	EPI(1), 0, 0 },
+	{ LIBUSB_TRANSFER_TYPE_BULK,	64,	EPO(1), 0, 0 }
+};
+
+static struct usb_intinfo zus_ints[] = {
+	USB_EPS(0, zus_epinfos)
 };
 #endif
 
@@ -759,6 +772,19 @@ static struct usb_find_devices find_dev[] = {
 		.timeout = GRIDSEED_TIMEOUT_MS,
 		.latency = LATENCY_STD,
 		INTINFO(gsd3_ints) },
+#endif
+#ifdef USE_ZEUS
+	{
+		.drv = DRIVER_zeus,
+		.name = "ZUS",
+		.ident = IDENT_ZUS,
+		.idVendor = 0x10c4,
+		.idProduct = 0xea60,
+		.iProduct = "CP2102 USB to UART Bridge Controller",
+		.config = 1,
+		.timeout = ZEUS_TIMEOUT_MS,
+		.latency = LATENCY_STD,
+		INTINFO(zus_ints) },
 #endif
 	{ DRIVER_MAX, NULL, 0, 0, 0, NULL, NULL, 0, 0, 0, 0, NULL }
 };
