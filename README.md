@@ -20,15 +20,15 @@ with `--zeus-clock`. These options are global. There is currently no provision
 
 With no `--scan-serial` options the driver will use libusb to autodetect any
 connected miners and to perform all device I/O operations. This is the
-recommended method if multiple drivers are compiled into cgminer.
+recommended method if multiple drivers are compiled into cgminer.   
 If `--scan-serial zeus:auto` is specified, the driver will use libudev to
 identify which USB-serial ports (if any) are from a Zeus miner and open those
 ports directly. All I/O will be done using direct serial reads and writes
 (not through libusb). This method may not work properly if multiple drivers
-are enabled.
+are enabled.   
 As a fallback should autodetection not work, individual devices can be specified
 manually using `--scan-serial zeus:/dev/ttyX` (note the "zeus:" is optional if
-only the Zeus driver has been compiled in).
+only the Zeus driver has been compiled in).   
 The following three examples are equivalent assuming three miners are connected:
 
 	# Using libusb
@@ -46,10 +46,10 @@ as testing and in case auto-detection fails.
 
 Chip count for different models: Blizzard: 6, Cyclone: 96
 
-Zeus driver is based on [documentation][zeus_doc] and the official reference implementation.
+Zeus driver is based on [documentation][zeus] and the official reference implementation.
 Many thanks also to sling00 and LinuxETC for providing access to test hardware.
 
-[zeus_doc] : <http://zeusminer.com/user-manual-ver-1-0/>
+[zeus]: <http://zeusminer.com/user-manual-ver-1-0/>
 
 ## Gridseed ##
 
