@@ -577,6 +577,8 @@ static void zeus_purge_work(struct cgpu_info *zeus)
 	}
 }
 
+#define nonce_range_start(cperc, cmax, core, chip) \
+	(((0xffffffff / cperc + 1) * core) + ((0x1fffffff / cmax + 1) * chip))
 static bool zeus_read_response(struct cgpu_info *zeus)
 {
 	struct ZEUS_INFO *info = zeus->device_data;
@@ -614,10 +616,10 @@ static bool zeus_read_response(struct cgpu_info *zeus)
 
 	//chip = chip_index(nonce, info->chips_bit_num);
 	core = (nonce & 0xe0000000) >> 29;		// core indicated by 3 highest bits
-	chip = (nonce & 0x1fffffff) / (0x1fffffff / info->chips_count);
+	chip = (nonce & 0x1ff80000) >> (29 - info->chips_bit_num);
 	duration_ms = ms_tdiff(&info->workend, &info->workstart);
 	if (duration_ms > 0)
-		info->hashes_per_ms = ((nonce & 0x1fffffff) % (0x1fffffff / info->chips_count)) * info->cores_per_chip * info->chips_count / duration_ms;
+		info->hashes_per_ms = (nonce - nonce_range_start(info->cores_per_chip, info->chips_count_max, core, chip)) / duration_ms * info->cores_per_chip * info->chips_count;
 	info->last_nonce = nonce;
 
 	if (chip < ZEUS_MAX_CHIPS && core < ZEUS_CHIP_CORES) {
@@ -946,11 +948,12 @@ static struct api_data *zeus_api_stats(struct cgpu_info *zeus)
 {
 	struct ZEUS_INFO *info = zeus->device_data;
 	struct api_data *root = NULL;
-	static struct timeval tv_now, tv_diff;
+	static struct timeval tv_now, tv_diff, tv_diff2;
 	static double khs_core, khs_chip, khs_board;
 
 	cgtime(&tv_now);
 	timersub(&tv_now, &(info->workstart), &tv_diff);
+	timersub(&(info->workend), &(info->workstart), &tv_diff2);
 
 	root = api_add_string(root, "Device Name", zeus->unique_id, false);
 	khs_core = (double)info->golden_speed_per_core / 1000.;
@@ -977,6 +980,7 @@ static struct api_data *zeus_api_stats(struct cgpu_info *zeus)
 
 		root = api_add_uint32(root, "hashes_per_ms", &(info->hashes_per_ms), false);
 		root = api_add_uint32(root, "last_nonce", &(info->last_nonce), false);
+		root = api_add_timeval(root, "last_nonce_time", &tv_diff2, false);
 	}
 
 	return root;
