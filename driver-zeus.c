@@ -284,10 +284,13 @@ static void zeus_get_device_options(const char *devid, int *chips_count, int *ch
 	*chips_count = (opt_zeus_chips_count) ? opt_zeus_chips_count : ZEUS_CLK_MIN;
 	*chip_clk = (opt_zeus_chip_clk) ? opt_zeus_chip_clk : ZEUS_MIN_CHIPS;
 
+	if (options == NULL)
+		return;
+
 	all = strdup(options);
 
-	for (p = strtok(all, ","); p != NULL; p = strtok(NULL, ",")) {
-		if (strncmp(p, devid, strlen(devid))) {
+	for (p = strtok(all, ";"); p != NULL; p = strtok(NULL, ";")) {
+		if (strncmp(p, devid, strlen(devid)) == 0) {
 			found = p;
 			break;
 		}
@@ -298,7 +301,7 @@ static void zeus_get_device_options(const char *devid, int *chips_count, int *ch
 		return;
 	}
 
-	for (p = strtok(found, ":"); p != NULL; p = strtok(NULL, ":")) {
+	for (p = strtok(found, ","); p != NULL; p = strtok(NULL, ",")) {
 		lval = strtol(p, NULL, 10);
 
 		switch (index++) {
@@ -660,14 +663,15 @@ static bool zeus_read_response(struct cgpu_info *zeus)
 	core = (nonce & 0xe0000000) >> 29;		// core indicated by 3 highest bits
 	chip = (nonce & 0x1ff80000) >> (29 - info->chips_bit_num);
 	duration_ms = ms_tdiff(&info->workend, &info->workstart);
-	if (duration_ms > 0)
-		info->hashes_per_ms = (nonce - nonce_range_start(info->cores_per_chip, info->chips_count_max, core, chip)) / duration_ms * info->cores_per_chip * info->chips_count;
-	info->last_nonce = nonce;
 
 	if (chip < ZEUS_MAX_CHIPS && core < ZEUS_CHIP_CORES) {
 		++info->nonce_count[chip][core];
 		if (!valid)
 			++info->error_count[chip][core];
+
+		if (duration_ms > 0)
+			info->hashes_per_ms = (nonce - nonce_range_start(info->cores_per_chip, info->chips_count_max, core, chip)) / duration_ms * info->cores_per_chip * info->chips_count;
+		info->last_nonce = nonce;
 	} else {
 		applog(LOG_INFO, "%s%d: Corrupt nonce message received, cannot determine chip and core",
 			zeus->drv->name, zeus->device_id);

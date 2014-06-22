@@ -1556,7 +1556,7 @@ static struct opt_table opt_config_table[] = {
 			"Skip golden nonce verification during initialization"),
 	OPT_WITH_ARG("--zeus-options",
 			opt_set_charp, NULL, &opt_zeus_options,
-			"Set individual Zeus device options: <ID>:chips:clock"),
+			"Set individual Zeus device options: ID,chips,clock[;ID,chips,clock...]"),
 #endif
 	OPT_ENDTABLE
 };
