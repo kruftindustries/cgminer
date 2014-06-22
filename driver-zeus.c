@@ -274,15 +274,57 @@ static unsigned char zeus_clk_to_freqcode(int clkfreq)
 	return (unsigned char)((double)clkfreq * 2. / 3.);
 }
 
-static void zeus_get_device_options(const char __maybe_unused *devpath, int *chips_count, int *chip_clk)
+static void zeus_get_device_options(const char *devid, int *chips_count, int *chip_clk, const char *options)
 {
-	/*
-	 * Placeholder for now, eventually return device-specific
-	 * chips count and clock rate here
-	 */
+	char *p, *all, *found = NULL;
+	long lval;
+	int index = 0;
 
-	*chips_count = opt_zeus_chips_count;	// number of chips per ASIC device
-	*chip_clk = opt_zeus_chip_clk;
+	// set global default options
+	*chips_count = (opt_zeus_chips_count) ? opt_zeus_chips_count : ZEUS_CLK_MIN;
+	*chip_clk = (opt_zeus_chip_clk) ? opt_zeus_chip_clk : ZEUS_MIN_CHIPS;
+
+	all = strdup(options);
+
+	for (p = strtok(all, ","); p != NULL; p = strtok(NULL, ",")) {
+		if (strncmp(p, devid, strlen(devid))) {
+			found = p;
+			break;
+		}
+	}
+
+	if (found == NULL) {
+		free(all);
+		return;
+	}
+
+	for (p = strtok(found, ":"); p != NULL; p = strtok(NULL, ":")) {
+		lval = strtol(p, NULL, 10);
+
+		switch (index++) {
+			case 1:			// chip count
+				if (lval < ZEUS_MIN_CHIPS || lval > ZEUS_MAX_CHIPS) {
+					applog(LOG_ERR, "Invalid chip count %ld for Zeus device %s",
+					       lval, devid);
+					break;
+				}
+				*chips_count = (int)lval;
+				break;
+			case 2:			// clock
+				if (lval < ZEUS_CLK_MIN || lval > ZEUS_CLK_MAX) {
+					applog(LOG_ERR, "Invalid clock speed %ld for Zeus device %s",
+					       lval, devid);
+					break;
+				}
+				*chip_clk = (int)lval;
+				break;
+			default:
+				break;
+		}
+	}
+
+	free(all);
+	return;
 }
 
 static char *zeus_device_name(int chips_count)
@@ -353,7 +395,7 @@ static struct cgpu_info *zeus_detect_one_usb(struct libusb_device *dev, struct u
 	strncpy(info->device_name, zeus->unique_id, sizeof(info->device_name) - 1);
 	info->device_name[sizeof(info->device_name) - 1] = '\0';
 
-	zeus_get_device_options(zeus->device_path, &info->chips_count, &info->chip_clk);
+	zeus_get_device_options(zeus->device_path, &info->chips_count, &info->chip_clk, opt_zeus_options);
 	zeus->name = zeus_device_name(info->chips_count);
 	info->freqcode = zeus_clk_to_freqcode(info->chip_clk);
 	info->baud = ZEUS_IO_SPEED;
@@ -420,7 +462,7 @@ static bool zeus_detect_one_serial(const char *devpath)
 			"55aa00ff"
 			"c00278894532091be6f16a5381ad33619dacb9e6a4a6e79956aac97b51112bfb93dc450b8fc765181a344b6244d42d78625f5c39463bbfdc10405ff711dc1222dd065b015ac9c2c66e28da7202000000";
 
-	zeus_get_device_options(devpath, &chips_count, &chip_clk);
+	zeus_get_device_options(devpath, &chips_count, &chip_clk, opt_zeus_options);
 	baud = ZEUS_IO_SPEED;				// baud rate is fixed
 	cores_per_chip = ZEUS_CHIP_CORES;		// cores/chip also fixed
 	chips_count_max = lowest_pow2(chips_count);

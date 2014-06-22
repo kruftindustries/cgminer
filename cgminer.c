@@ -266,6 +266,7 @@ bool opt_zeus_debug;
 int opt_zeus_chips_count;
 int opt_zeus_chip_clk;
 bool opt_zeus_nocheck_golden;
+char *opt_zeus_options;
 #endif
 static char *opt_set_null;
 #ifdef USE_MINION
@@ -1553,6 +1554,9 @@ static struct opt_table opt_config_table[] = {
 	OPT_WITHOUT_ARG("--zeus-nocheck-golden",
 			opt_set_bool, &opt_zeus_nocheck_golden,
 			"Skip golden nonce verification during initialization"),
+	OPT_WITH_ARG("--zeus-options",
+			opt_set_charp, NULL, &opt_zeus_options,
+			"Set individual Zeus device options: <ID>:chips:clock"),
 #endif
 	OPT_ENDTABLE
 };

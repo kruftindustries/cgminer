@@ -8,6 +8,7 @@
 #define ZEUS_CHIP_GEN			1
 #define ZEUS_CHIP_GEN1_CORES		8
 #define ZEUS_CHIP_CORES			ZEUS_CHIP_GEN1_CORES
+#define ZEUS_MIN_CHIPS			6
 #define ZEUS_MAX_CHIPS			1024
 
 #define ZEUS_IO_SPEED			115200
@@ -18,7 +19,7 @@
 #define ZEUS_EVENT_PKT_LEN		4
 
 #define ZEUS_CLK_MAX			382	// 0xff * 3/2
-#define ZEUS_CLK_MIN			2
+#define ZEUS_CLK_MIN			200
 
 #define ZEUS_USB_ID_MODEL_STR		"CP2102_USB_to_UART_Bridge_Controller"
 
