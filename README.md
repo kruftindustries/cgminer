@@ -54,9 +54,9 @@ as testing and in case auto-detection fails.
 ### Device Identification ###
 
 The Zeus miners currently do not provide a unique serial number, therefore the driver
-identifies them by their port. If using serial I/O the ID for use with --zeus-options
+identifies them by their port. If using serial I/O the ID for use with `--zeus-options`
 is the full path name of the serial port (eg: /dev/ttyUSB0). If using libusb the ID
-consists of the string "<bus number>:<device address>". These parameters can be found
+consists of the string `<bus number>:<device address>`. These parameters can be found
 by running `./cgminer --ndevs` or by examining the output of `lsusb`. The ID is also
 shown on each device's status line on the main screen of cgminer.
 
@@ -68,6 +68,8 @@ Zeus driver is based on [documentation][zeus] and the official reference impleme
 Many thanks also to sling00 and LinuxETC for providing access to test hardware.
 
 [zeus]: <http://zeusminer.com/user-manual-ver-1-0/>
+
+- - - - - - - -
 
 ## Gridseed ##
 
