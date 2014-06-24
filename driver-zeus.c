@@ -417,9 +417,8 @@ static struct cgpu_info *zeus_detect_one_usb(struct libusb_device *dev, struct u
 	}
 
 	info->golden_speed_per_core = (((info->chip_clk * 2.) / 3.) * 1024.) / 8.;
-	info->work_timeout.tv_sec = 4294967296LL / (info->golden_speed_per_core * info->cores_per_chip * info->chips_count);
-	info->work_timeout.tv_usec = ((4294967296LL * 1000000L) / (info->golden_speed_per_core * info->cores_per_chip * info->chips_count)) % 1000000L;
-	info->golden_speed_per_core = info->golden_speed_per_core;
+	info->work_timeout.tv_sec = 4294967296LL / (info->golden_speed_per_core * info->cores_per_chip * info->chips_count_max) * 0.9;
+	info->work_timeout.tv_usec = 0;
 	info->read_count = (uint32_t)((4294967296LL*10)/(info->cores_per_chip*info->chips_count_max*info->golden_speed_per_core*2));
 	info->read_count = info->read_count*3/4;
 
@@ -585,8 +584,8 @@ static bool zeus_detect_one_serial(const char *devpath)
 	strncpy(info->device_name, zeus->unique_id, sizeof(info->device_name) - 1);
 	info->device_name[sizeof(info->device_name) - 1] = '\0';
 
-	info->work_timeout.tv_sec = 4294967296LL / (golden_speed_per_core * cores_per_chip * chips_count);
-	info->work_timeout.tv_usec = ((4294967296LL * 1000000L) / (golden_speed_per_core * cores_per_chip * chips_count)) % 1000000L;
+	info->work_timeout.tv_sec = 4294967296LL / (golden_speed_per_core * cores_per_chip * chips_count_max) * 0.9;
+	info->work_timeout.tv_usec = 0;
 	info->golden_speed_per_core = golden_speed_per_core;
 	info->read_count = (uint32_t)((4294967296LL*10)/(cores_per_chip*chips_count_max*golden_speed_per_core*2));
 	info->read_count = info->read_count*3/4;
@@ -669,9 +668,10 @@ static bool zeus_read_response(struct cgpu_info *zeus)
 		if (!valid)
 			++info->error_count[chip][core];
 
-		if (duration_ms > 0)
+		if (valid && duration_ms > 0) {
 			info->hashes_per_ms = (nonce - nonce_range_start(info->cores_per_chip, info->chips_count_max, core, chip)) / duration_ms * info->cores_per_chip * info->chips_count;
-		info->last_nonce = nonce;
+			info->last_nonce = nonce;
+		}
 	} else {
 		applog(LOG_INFO, "%s%d: Corrupt nonce message received, cannot determine chip and core",
 			zeus->drv->name, zeus->device_id);
@@ -933,6 +933,7 @@ static bool zeus_thread_init(struct thr_info *thr)
 	return true;
 }
 
+#define ZEUS_LIVE_HASHRATE 1
 static int64_t zeus_scanwork(struct thr_info *thr)
 {
 	struct cgpu_info *zeus = thr->cgpu;
@@ -964,7 +965,7 @@ static int64_t zeus_scanwork(struct thr_info *thr)
 	old_scanwork_time = info->scanwork_time;
 	cgtime(&info->scanwork_time);
 	elapsed_s = tdiff(&info->scanwork_time, &old_scanwork_time);
-#if 0
+#ifdef ZEUS_LIVE_HASHRATE
 	estimate_hashes = elapsed_s * info->hashes_per_ms * 1000;
 #else
 	estimate_hashes = elapsed_s * info->golden_speed_per_core *
