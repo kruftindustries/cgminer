@@ -64,9 +64,12 @@ static struct name_chip_map {
 	char	*model_name;
 	int	chips_count;
 } zeus_models[] = {
-	{ "Blizzard",	6  },
-	{ "Cyclone",	96 },
-	/* TODO: add more models */
+	{ "Blizzard",		6  },
+	//{ "Cyclone",		96 },	// model renamed??
+	{ "Hurricane X2",	48 },
+	{ "Hurricane X3",	64 },
+	{ "Thunder X2",		96 },
+	{ "Thunder X3",		128 },
 	{ NULL, 0 }
 };
 
@@ -290,8 +293,8 @@ static void zeus_get_device_options(const char *devid, int *chips_count, int *ch
 	int index = 0;
 
 	// set global default options
-	*chips_count = (opt_zeus_chips_count) ? opt_zeus_chips_count : ZEUS_CLK_MIN;
-	*chip_clk = (opt_zeus_chip_clk) ? opt_zeus_chip_clk : ZEUS_MIN_CHIPS;
+	*chips_count = (opt_zeus_chips_count) ? opt_zeus_chips_count : ZEUS_MIN_CHIPS;
+	*chip_clk = (opt_zeus_chip_clk) ? opt_zeus_chip_clk : ZEUS_CLK_MIN;
 
 	if (options == NULL)
 		return;
@@ -1050,7 +1053,10 @@ static struct api_data *zeus_api_stats(struct cgpu_info *zeus)
 static void zeus_get_statline_before(char *buf, size_t bufsiz, struct cgpu_info *zeus)
 {
 	struct ZEUS_INFO *info = zeus->device_data;
-	tailsprintf(buf, bufsiz, "%-10s  %4d MHz  ", zeus->name, info->chip_clk);
+	if (zeus->name)
+		tailsprintf(buf, bufsiz, "%-12s  %4d MHz  ", zeus->name, info->chip_clk);
+	else
+		tailsprintf(buf, bufsiz, "%4d chips  %4d MHz  ", info->chips_count, info->chip_clk);
 }
 
 static char *zeus_set_device(struct cgpu_info *zeus, char *option, char *setting, char *replybuf)
