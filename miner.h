@@ -1047,6 +1047,7 @@ extern bool opt_zeus_debug;
 extern int opt_zeus_chips_count;
 extern int opt_zeus_chip_clk;
 extern bool opt_zeus_nocheck_golden;
+extern char *opt_zeus_options;
 #endif
 extern int swork_id;
 

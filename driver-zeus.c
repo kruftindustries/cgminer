@@ -283,15 +283,60 @@ static unsigned char zeus_clk_to_freqcode(int clkfreq)
 	return (unsigned char)((double)clkfreq * 2. / 3.);
 }
 
-static void zeus_get_device_options(const char __maybe_unused *devpath, int *chips_count, int *chip_clk)
+static void zeus_get_device_options(const char *devid, int *chips_count, int *chip_clk, const char *options)
 {
-	/*
-	 * Placeholder for now, eventually return device-specific
-	 * chips count and clock rate here
-	 */
+	char *p, *all, *found = NULL;
+	long lval;
+	int index = 0;
 
-	*chips_count = opt_zeus_chips_count;	// number of chips per ASIC device
-	*chip_clk = opt_zeus_chip_clk;
+	// set global default options
+	*chips_count = (opt_zeus_chips_count) ? opt_zeus_chips_count : ZEUS_CLK_MIN;
+	*chip_clk = (opt_zeus_chip_clk) ? opt_zeus_chip_clk : ZEUS_MIN_CHIPS;
+
+	if (options == NULL)
+		return;
+
+	all = strdup(options);
+
+	for (p = strtok(all, ";"); p != NULL; p = strtok(NULL, ";")) {
+		if (strncmp(p, devid, strlen(devid)) == 0) {
+			found = p;
+			break;
+		}
+	}
+
+	if (found == NULL) {
+		free(all);
+		return;
+	}
+
+	for (p = strtok(found, ","); p != NULL; p = strtok(NULL, ",")) {
+		lval = strtol(p, NULL, 10);
+
+		switch (index++) {
+			case 1:			// chip count
+				if (lval < ZEUS_MIN_CHIPS || lval > ZEUS_MAX_CHIPS) {
+					applog(LOG_ERR, "Invalid chip count %ld for Zeus device %s",
+					       lval, devid);
+					break;
+				}
+				*chips_count = (int)lval;
+				break;
+			case 2:			// clock
+				if (lval < ZEUS_CLK_MIN || lval > ZEUS_CLK_MAX) {
+					applog(LOG_ERR, "Invalid clock speed %ld for Zeus device %s",
+					       lval, devid);
+					break;
+				}
+				*chip_clk = (int)lval;
+				break;
+			default:
+				break;
+		}
+	}
+
+	free(all);
+	return;
 }
 
 static char *zeus_device_name(int chips_count)
@@ -362,7 +407,7 @@ static struct cgpu_info *zeus_detect_one_usb(struct libusb_device *dev, struct u
 	strncpy(info->device_name, zeus->unique_id, sizeof(info->device_name) - 1);
 	info->device_name[sizeof(info->device_name) - 1] = '\0';
 
-	zeus_get_device_options(zeus->device_path, &info->chips_count, &info->chip_clk);
+	zeus_get_device_options(zeus->device_path, &info->chips_count, &info->chip_clk, opt_zeus_options);
 	zeus->name = zeus_device_name(info->chips_count);
 	info->freqcode = zeus_clk_to_freqcode(info->chip_clk);
 	info->baud = ZEUS_IO_SPEED;
@@ -381,9 +426,8 @@ static struct cgpu_info *zeus_detect_one_usb(struct libusb_device *dev, struct u
 	}
 
 	info->golden_speed_per_core = (((info->chip_clk * 2.) / 3.) * 1024.) / 8.;
-	info->work_timeout.tv_sec = 4294967296LL / (info->golden_speed_per_core * info->cores_per_chip * info->chips_count);
-	info->work_timeout.tv_usec = ((4294967296LL * 1000000L) / (info->golden_speed_per_core * info->cores_per_chip * info->chips_count)) % 1000000L;
-	info->golden_speed_per_core = info->golden_speed_per_core;
+	info->work_timeout.tv_sec = 4294967296LL / (info->golden_speed_per_core * info->cores_per_chip * info->chips_count_max) * 0.9;
+	info->work_timeout.tv_usec = 0;
 	info->read_count = (uint32_t)((4294967296LL*10)/(info->cores_per_chip*info->chips_count_max*info->golden_speed_per_core*2));
 	info->read_count = info->read_count*3/4;
 
@@ -429,7 +473,7 @@ static bool zeus_detect_one_serial(const char *devpath)
 			"55aa00ff"
 			"c00278894532091be6f16a5381ad33619dacb9e6a4a6e79956aac97b51112bfb93dc450b8fc765181a344b6244d42d78625f5c39463bbfdc10405ff711dc1222dd065b015ac9c2c66e28da7202000000";
 
-	zeus_get_device_options(devpath, &chips_count, &chip_clk);
+	zeus_get_device_options(devpath, &chips_count, &chip_clk, opt_zeus_options);
 	baud = ZEUS_IO_SPEED;				// baud rate is fixed
 	cores_per_chip = ZEUS_CHIP_CORES;		// cores/chip also fixed
 	chips_count_max = lowest_pow2(chips_count);
@@ -551,8 +595,8 @@ static bool zeus_detect_one_serial(const char *devpath)
 	strncpy(info->device_name, zeus->unique_id, sizeof(info->device_name) - 1);
 	info->device_name[sizeof(info->device_name) - 1] = '\0';
 
-	info->work_timeout.tv_sec = 4294967296LL / (golden_speed_per_core * cores_per_chip * chips_count);
-	info->work_timeout.tv_usec = ((4294967296LL * 1000000L) / (golden_speed_per_core * cores_per_chip * chips_count)) % 1000000L;
+	info->work_timeout.tv_sec = 4294967296LL / (golden_speed_per_core * cores_per_chip * chips_count_max) * 0.9;
+	info->work_timeout.tv_usec = 0;
 	info->golden_speed_per_core = golden_speed_per_core;
 	info->read_count = (uint32_t)((4294967296LL*10)/(cores_per_chip*chips_count_max*golden_speed_per_core*2));
 	info->read_count = info->read_count*3/4;
@@ -588,6 +632,8 @@ static void zeus_purge_work(struct cgpu_info *zeus)
 	}
 }
 
+#define nonce_range_start(cperc, cmax, core, chip) \
+	(((0xffffffff / cperc + 1) * core) + ((0x1fffffff / cmax + 1) * chip))
 static bool zeus_read_response(struct cgpu_info *zeus)
 {
 	struct ZEUS_INFO *info = zeus->device_data;
@@ -625,16 +671,18 @@ static bool zeus_read_response(struct cgpu_info *zeus)
 
 	//chip = chip_index(nonce, info->chips_bit_num);
 	core = (nonce & 0xe0000000) >> 29;		// core indicated by 3 highest bits
-	chip = (nonce & 0x1fffffff) / (0x1fffffff / info->chips_count);
+	chip = (nonce & 0x1ff80000) >> (29 - info->chips_bit_num);
 	duration_ms = ms_tdiff(&info->workend, &info->workstart);
-	if (duration_ms > 0)
-		info->hashes_per_ms = ((nonce & 0x1fffffff) % (0x1fffffff / info->chips_count)) * info->cores_per_chip * info->chips_count / duration_ms;
-	info->last_nonce = nonce;
 
 	if (chip < ZEUS_MAX_CHIPS && core < ZEUS_CHIP_CORES) {
 		++info->nonce_count[chip][core];
 		if (!valid)
 			++info->error_count[chip][core];
+
+		if (valid && duration_ms > 0) {
+			info->hashes_per_ms = (nonce - nonce_range_start(info->cores_per_chip, info->chips_count_max, core, chip)) / duration_ms * info->cores_per_chip * info->chips_count;
+			info->last_nonce = nonce;
+		}
 	} else {
 		applog(LOG_INFO, "%s%d: Corrupt nonce message received, cannot determine chip and core",
 			zeus->drv->name, zeus->device_id);
@@ -899,6 +947,7 @@ static bool zeus_thread_init(struct thr_info *thr)
 	return true;
 }
 
+#define ZEUS_LIVE_HASHRATE 1
 static int64_t zeus_scanwork(struct thr_info *thr)
 {
 	struct cgpu_info *zeus = thr->cgpu;
@@ -930,7 +979,7 @@ static int64_t zeus_scanwork(struct thr_info *thr)
 	old_scanwork_time = info->scanwork_time;
 	cgtime(&info->scanwork_time);
 	elapsed_s = tdiff(&info->scanwork_time, &old_scanwork_time);
-#if 0
+#ifdef ZEUS_LIVE_HASHRATE
 	estimate_hashes = elapsed_s * info->hashes_per_ms * 1000;
 #else
 	estimate_hashes = elapsed_s * info->golden_speed_per_core *
@@ -960,11 +1009,12 @@ static struct api_data *zeus_api_stats(struct cgpu_info *zeus)
 {
 	struct ZEUS_INFO *info = zeus->device_data;
 	struct api_data *root = NULL;
-	static struct timeval tv_now, tv_diff;
+	static struct timeval tv_now, tv_diff, tv_diff2;
 	static double khs_core, khs_chip, khs_board;
 
 	cgtime(&tv_now);
 	timersub(&tv_now, &(info->workstart), &tv_diff);
+	timersub(&(info->workend), &(info->workstart), &tv_diff2);
 
 	root = api_add_string(root, "Device Name", zeus->unique_id, false);
 	khs_core = (double)info->golden_speed_per_core / 1000.;
@@ -991,6 +1041,7 @@ static struct api_data *zeus_api_stats(struct cgpu_info *zeus)
 
 		root = api_add_uint32(root, "hashes_per_ms", &(info->hashes_per_ms), false);
 		root = api_add_uint32(root, "last_nonce", &(info->last_nonce), false);
+		root = api_add_timeval(root, "last_nonce_time", &tv_diff2, false);
 	}
 
 	return root;

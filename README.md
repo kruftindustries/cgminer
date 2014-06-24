@@ -15,20 +15,27 @@ Scrypt algorithm code was ported from CGMiner version 3.7.2.
 
 The Zeus driver needs to be configured with two runtime options: the number of
 chips per ASIC device with `--zeus-chips` and the desired clock speed in MHz
-with `--zeus-clock`. These options are global. There is currently no provision
-(yet) to specify these on a per-device basis.
+with `--zeus-clock`. These options are applied to all Zeus miners. To set options
+for a specific device use `--zeus-options ID,chips,clock` where ID specifies
+the device (see below) and chips and clock set the respective options. Multiple
+ID,chips,clock tuples can be joined together separated by semi-colons.
+
+### Device Selection ###
 
 With no `--scan-serial` options the driver will use libusb to autodetect any
 connected miners and to perform all device I/O operations. This is the
-recommended method if multiple drivers are compiled into cgminer.   
+recommended method if multiple drivers are compiled into cgminer.
+
 If `--scan-serial zeus:auto` is specified, the driver will use libudev to
 identify which USB-serial ports (if any) are from a Zeus miner and open those
 ports directly. All I/O will be done using direct serial reads and writes
 (not through libusb). This method may not work properly if multiple drivers
-are enabled.   
+are enabled.
+
 As a fallback should autodetection not work, individual devices can be specified
 manually using `--scan-serial zeus:/dev/ttyX` (note the "zeus:" is optional if
-only the Zeus driver has been compiled in).   
+only the Zeus driver has been compiled in).
+
 The following three examples are equivalent assuming three miners are connected:
 
 	# Using libusb
@@ -44,12 +51,25 @@ The following three examples are equivalent assuming three miners are connected:
 The reason for the multitude of options is for backward compatibility as well
 as testing and in case auto-detection fails.
 
+### Device Identification ###
+
+The Zeus miners currently do not provide a unique serial number, therefore the driver
+identifies them by their port. If using serial I/O the ID for use with `--zeus-options`
+is the full path name of the serial port (eg: /dev/ttyUSB0). If using libusb the ID
+consists of the string `<bus number>:<device address>`. These parameters can be found
+by running `./cgminer --ndevs` or by examining the output of `lsusb`. The ID is also
+shown on each device's status line on the main screen of cgminer.
+
+Note that IDs may change upon reboot or when unplugged and replugged.
+
 Chip count for different models: Blizzard: 6, Cyclone: 96
 
 Zeus driver is based on [documentation][zeus] and the official reference implementation.
 Many thanks also to sling00 and LinuxETC for providing access to test hardware.
 
 [zeus]: <http://zeusminer.com/user-manual-ver-1-0/>
+
+- - - - - - - -
 
 ## Gridseed ##
 
