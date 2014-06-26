@@ -30,26 +30,27 @@ If `--scan-serial zeus:auto` is specified, the driver will use libudev to
 identify which USB-serial ports (if any) are from a Zeus miner and open those
 ports directly. All I/O will be done using direct serial reads and writes
 (not through libusb). This method may not work properly if multiple drivers
-are enabled.
+are enabled. This method is only available on Linux.
 
-As a fallback should autodetection not work, individual devices can be specified
-manually using `--scan-serial zeus:/dev/ttyX` (note the "zeus:" is optional if
-only the Zeus driver has been compiled in).
+Individual devices can be specified manually using `--scan-serial zeus:/dev/ttyX`
+(note the "zeus:" is optional if only the Zeus driver has been compiled in). This
+disables autodetection (for the Zeus driver only) and all I/O will also be done
+using direct serial reads and writes instead of through libusb.
 
 The following three examples are equivalent assuming three miners are connected:
 
 	# Using libusb
 	./cgminer --scrypt --zeus-chips 96 --zeus-clock 328
 	
-	# Direct serial I/O, auto-detect ports
+	# Direct serial I/O, auto-detect ports (Linux only)
 	./cgminer --scrypt --zeus-chips 96 --zeus-clock 328 --scan-serial zeus:auto
 	
 	# Direct serial I/O, manual port specification
 	./cgminer --scrypt --zeus-chips 96 --zeus-clock 328 --scan-serial /dev/ttyUSB0 \
 		--scan-serial /dev/ttyUSB1 --scan-serial /dev/ttyUSB2
 
-The reason for the multitude of options is for backward compatibility as well
-as testing and in case auto-detection fails.
+The different methods are provided to accomodate different systems or preferences
+and as fallback.
 
 ### Device Identification ###
 
