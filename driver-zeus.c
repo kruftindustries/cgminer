@@ -779,7 +779,7 @@ static void *zeus_io_thread(void *data)
 	while (likely(!zeus->shutdown)) {
 		mutex_lock(&info->lock);
 		if (unlikely(info->serial_reopen)) {
-			if (!zeus_reopen(zeus)) {
+			if (using_serial(info) && !zeus_reopen(zeus)) {
 				applog(LOG_ERR, "Failed to reopen %s%d on %s, shutting down",
 					zeus->drv->name, zeus->device_id, zeus->device_path);
 				mutex_unlock(&info->lock);
@@ -874,7 +874,7 @@ static bool zeus_prepare(struct thr_info *thr)
 	applog(LOG_NOTICE, "%s%d opened on %s",
 			zeus->drv->name, zeus->device_id, zeus->device_path);
 
-	info->serial_reopen = true;
+	info->serial_reopen = (using_serial(info)) ? true : false;
 	info->thr = thr;
 	mutex_init(&info->lock);
 	cgsem_init(&info->wusem);
