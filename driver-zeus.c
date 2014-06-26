@@ -660,6 +660,8 @@ static bool zeus_read_response(struct cgpu_info *zeus)
 		flush_uart(info->device_fd);
 	}
 
+	cgtime(&info->workend);
+
 	memcpy(&nonce, evtpkt, sizeof(evtpkt));
 	nonce = be32toh(nonce);
 
