@@ -7,6 +7,10 @@ This file describes Scrypt-specific settings and options.
 For general CGMiner information refer to README.
 Scrypt algorithm code was ported from CGMiner version 3.7.2.
 
+Compatibility note: The current master branch uses features that will not
+compile on Windows under MinGW. For a MinGW compatible version, please
+use the [zeus_mingw](https://github.com/dmaxl/cgminer/tree/zeus_mingw) branch.
+
 ## Zeus ##
 
 	./autogen.sh
