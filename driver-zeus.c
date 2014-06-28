@@ -406,11 +406,14 @@ static struct cgpu_info *zeus_detect_one_usb(struct libusb_device *dev, struct u
 
 	info->device_fd = -1;
 	info->using_libusb = 1;
-	zeus->unique_id = zeus->device_path;
+	if (zeus->usbdev->serial_string && strlen(zeus->usbdev->serial_string) > 4)
+		zeus->unique_id = zeus->usbdev->serial_string;
+	else
+		zeus->unique_id = zeus->device_path;
 	strncpy(info->device_name, zeus->unique_id, sizeof(info->device_name) - 1);
 	info->device_name[sizeof(info->device_name) - 1] = '\0';
 
-	zeus_get_device_options(zeus->device_path, &info->chips_count, &info->chip_clk, opt_zeus_options);
+	zeus_get_device_options(zeus->unique_id, &info->chips_count, &info->chip_clk, opt_zeus_options);
 	zeus->name = zeus_device_name(info->chips_count);
 	info->freqcode = zeus_clk_to_freqcode(info->chip_clk);
 	info->baud = ZEUS_IO_SPEED;

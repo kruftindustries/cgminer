@@ -57,14 +57,15 @@ as testing and in case auto-detection fails.
 
 ### Device Identification ###
 
-The Zeus miners currently do not provide a unique serial number, therefore the driver
-identifies them by their port. If using serial I/O the ID for use with `--zeus-options`
-is the full path name of the serial port (eg: /dev/ttyUSB0). If using libusb the ID
-consists of the string `<bus number>:<device address>`. These parameters can be found
-by running `./cgminer --ndevs` or by examining the output of `lsusb`. The ID is also
-shown on each device's status line on the main screen of cgminer.
+When using serial I/O the ID for use with `--zeus-options` is the full path name
+of the serial port (eg: /dev/ttyUSB0). If using libusb the ID is the miner's
+USB serial number, which can be found by running `./cgminer --ndevs` or on Linux
+by examining the output of `lsusb`. The ID is also shown on each device's status
+line on the main screen of cgminer.
 
-Note that IDs may change upon reboot or when unplugged and replugged.
+Note: Early hardware versions (at least batch 1) used a different USB-Serial chip
+which did not provide a valid serial number. In that case the ID used in CGMiner
+is the USB bus and device address in this format: `<bus number>:<device address>`
 
 Chip count for different models: Blizzard: 6, Cyclone: 96
 
