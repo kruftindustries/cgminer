@@ -349,7 +349,7 @@ static char *zeus_device_name(int chips_count)
 	return NULL;
 }
 
-static int zeus_usb_control_transfer(struct cgpu_info *zeus, uint8_t request_type, uint8_t bRequest,
+static int zeus_usb_control_transfer_data(struct cgpu_info *zeus, uint8_t request_type, uint8_t bRequest,
 		uint16_t wValue, uint16_t wIndex, uint32_t *data, int siz, enum usb_cmds cmd)
 {
 	int err = usb_transfer_data(zeus, request_type, bRequest, wValue, wIndex, data, siz, cmd);
@@ -359,28 +359,98 @@ static int zeus_usb_control_transfer(struct cgpu_info *zeus, uint8_t request_typ
 	return err;
 }
 
-static bool zeus_initialize_usbuart(struct cgpu_info *zeus)
+static inline int zeus_usb_control_transfer(struct cgpu_info *zeus, uint8_t request_type, uint8_t bRequest,
+		uint16_t wValue, uint16_t wIndex, enum usb_cmds cmd)
+{
+	return zeus_usb_control_transfer_data(zeus, request_type, bRequest, wValue, wIndex, NULL, 0, cmd);
+}
+
+static bool zeus_initialize_cp2102(struct cgpu_info *zeus)
 {
 	int interface = usb_interface(zeus);
 	//uint32_t baudrate = CP210X_DATA_BAUD;
 
 	// Enable the UART
 	if (zeus_usb_control_transfer(zeus, CP210X_TYPE_OUT, CP210X_REQUEST_IFC_ENABLE,
-			CP210X_VALUE_UART_ENABLE, interface, NULL, 0, C_ENABLE_UART))
+			CP210X_VALUE_UART_ENABLE, interface, C_ENABLE_UART))
 		return false;
 
 	// Set data control
 	if (zeus_usb_control_transfer(zeus, CP210X_TYPE_OUT, CP210X_REQUEST_DATA,
-			CP210X_VALUE_DATA, interface, NULL, 0, C_SETDATA))
+			CP210X_VALUE_DATA, interface, C_SETDATA))
 		return false;
 
 	// Zeusminers have baud hardcoded to 115200, and reject baud commands, even to same value
 	// Set the baud
-	//if (zeus_usb_control_transfer(zeus, CP210X_TYPE_OUT, CP210X_REQUEST_BAUD,
+	//if (zeus_usb_control_transfer_data(zeus, CP210X_TYPE_OUT, CP210X_REQUEST_BAUD,
 	//		0, interface, &baudrate, sizeof(baudrate), C_SETBAUD))
 	//	return false;
 
 	return true;
+}
+
+static bool zeus_initialize_ftdi(struct cgpu_info *zeus)
+{
+	int interface = usb_interface(zeus);
+
+	// Reset
+	if (zeus_usb_control_transfer(zeus, FTDI_TYPE_OUT, FTDI_REQUEST_RESET,
+		FTDI_VALUE_RESET, interface, C_RESET))
+		return false;
+
+	// Latency
+	usb_ftdi_set_latency(zeus);
+
+	// Data
+	if (zeus_usb_control_transfer(zeus, FTDI_TYPE_OUT, FTDI_REQUEST_DATA,
+		FTDI_VALUE_DATA_ZUS, interface, C_SETDATA))
+		return false;
+
+	// Baudrate
+	if (zeus_usb_control_transfer(zeus, FTDI_TYPE_OUT, FTDI_REQUEST_BAUD,
+		FTDI_VALUE_BAUD_ZUS, (FTDI_INDEX_BAUD_ZUS & 0xff00) | interface, C_SETBAUD))
+		return false;
+
+	// Modem control
+	if (zeus_usb_control_transfer(zeus, FTDI_TYPE_OUT, FTDI_REQUEST_MODEM,
+		FTDI_VALUE_MODEM, interface, C_SETMODEM))
+		return false;
+
+	// Flow control
+	if (zeus_usb_control_transfer(zeus, FTDI_TYPE_OUT, FTDI_REQUEST_FLOW,
+		FTDI_VALUE_FLOW, interface, C_SETFLOW))
+		return false;
+
+	// Clear buffers
+	if (zeus_usb_control_transfer(zeus, FTDI_TYPE_OUT, FTDI_REQUEST_RESET,
+		FTDI_VALUE_PURGE_TX, interface, C_PURGETX))
+		return false;
+
+	if (zeus_usb_control_transfer(zeus, FTDI_TYPE_OUT, FTDI_REQUEST_RESET,
+		FTDI_VALUE_PURGE_RX, interface, C_PURGERX))
+		return false;
+
+	return true;
+}
+
+static bool zeus_initialize_usb(struct cgpu_info *zeus)
+{
+	enum sub_ident ident;
+
+	if (zeus->usbinfo.nodev)
+		return false;
+
+	ident = usb_ident(zeus);
+
+	switch (ident) {
+	case IDENT_ZUS1:
+		return zeus_initialize_cp2102(zeus);
+	case IDENT_ZUS2:
+		return zeus_initialize_ftdi(zeus);
+	default:
+		applog(LOG_ERR, "zeus_initialize_usb called on wrong device, ident=%d", ident);
+		return false;
+	}
 }
 
 static struct cgpu_info *zeus_detect_one_usb(struct libusb_device *dev, struct usb_find_devices *found)
@@ -421,7 +491,7 @@ static struct cgpu_info *zeus_detect_one_usb(struct libusb_device *dev, struct u
 	update_usb_stats(zeus);
 
 	zeus->usbdev->usb_type = USB_TYPE_STD;
-	if (!zeus_initialize_usbuart(zeus)) {
+	if (!zeus_initialize_usb(zeus)) {
 		applog(LOG_ERR, "Failed to initialize Zeus USB-UART interface");
 		goto alldealloc;
 	}
