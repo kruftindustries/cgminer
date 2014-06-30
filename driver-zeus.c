@@ -929,6 +929,7 @@ static void *zeus_send_work_thread(void *data)
 static int zeus_autoscan()
 {
 	int found = 0;
+	applog(LOG_DEBUG, "zeus_autoscan() called");
 	found += serial_autodetect_udev(zeus_detect_one_serial, ZEUS_USB_ID_MODEL_STR1);
 	found += serial_autodetect_udev(zeus_detect_one_serial, ZEUS_USB_ID_MODEL_STR2);
 	return found;
@@ -947,7 +948,7 @@ static void zeus_detect(bool __maybe_unused hotplug)
 	if (serial_usb < 0)
 		usb_detect(&zeus_drv, zeus_detect_one_usb);
 	else
-		serial_detect_auto(&zeus_drv, zeus_detect_one_serial, zeus_autoscan);
+		serial_detect_iauto(&zeus_drv, zeus_detect_one_serial, zeus_autoscan);
 }
 
 static bool zeus_prepare(struct thr_info *thr)
