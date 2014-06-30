@@ -41,7 +41,7 @@ struct ZEUS_INFO {
 	struct timeval	workend;
 	struct timeval	scanwork_time;
 	struct timeval	work_timeout;
-	uint32_t	hashes_per_s;
+	uint32_t	hashes_per_ms;
 	uint64_t	golden_speed_per_core;	// speed per core per sec
 	uint32_t	read_count;
 	uint32_t	last_nonce;
@@ -50,7 +50,7 @@ struct ZEUS_INFO {
 	unsigned char	freqcode;
 
 	struct thr_info	*thr;
-	pthread_t	sworkpth;
+	pthread_t	pth_io;
 	pthread_mutex_t	lock;
 	cgsem_t		wusem;
 

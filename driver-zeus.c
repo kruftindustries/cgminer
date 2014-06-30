@@ -140,7 +140,7 @@ static int lowest_pow2(int min)
 	return 1024;
 }
 
-static void notify_send_work_thread(struct cgpu_info *zeus)
+static void notify_io_thread(struct cgpu_info *zeus)
 {
 	struct ZEUS_INFO *info = zeus->device_data;
 	cgsem_post(&info->wusem);
@@ -159,7 +159,7 @@ static bool zeus_reopen(struct cgpu_info *zeus)
 	struct ZEUS_INFO *info = zeus->device_data;
 	int try, fd = -1;
 
-	if (!using_serial(info))	// sanity check
+	if (using_libusb(info))		// with libusb let hotplog take care of reopening
 		return false;
 
 	if (info->device_fd != -1) {
@@ -703,6 +703,7 @@ static void zeus_purge_work(struct cgpu_info *zeus)
 		free_work(info->current_work);
 		info->current_work = NULL;
 	}
+	notify_io_thread(zeus);
 	mutex_unlock(&info->lock);
 }
 
@@ -712,29 +713,27 @@ static bool zeus_read_response(struct cgpu_info *zeus)
 {
 	struct ZEUS_INFO *info = zeus->device_data;
 	unsigned char evtpkt[ZEUS_EVENT_PKT_LEN];
-	int ret, err;
+	int ret, duration_ms, err;
 	uint32_t nonce, chip, core;
-	double duration_s;
 	bool valid;
 
 	if (using_libusb(info)) {
 		err = usb_read_timeout(zeus, (char *)evtpkt, sizeof(evtpkt), &ret, 250, C_GETRESULTS);
-		if (err != LIBUSB_SUCCESS && err != LIBUSB_ERROR_TIMEOUT) {
+		if (err && err == LIBUSB_ERROR_TIMEOUT) {
+			return false;
+		} else if (err && err != LIBUSB_ERROR_TIMEOUT) {
 			applog(LOG_ERR, "%s%d: USB read error: %s",
 				zeus->drv->name, zeus->device_id, libusb_error_name(err));
 			return false;
-		} else if (err == LIBUSB_ERROR_TIMEOUT) {
-			return true;
 		}
 	} else {
 		ret = zeus_serial_read(info->device_fd, evtpkt, sizeof(evtpkt), 1, NULL);
-		if (ret < 0) {		// error
+		if (ret < 0) {
 			info->serial_reopen = true;
-			notify_send_work_thread(zeus);
 			return false;
-		} else if (ret == 0) {	// timeout
-			return true;
 		}
+		if (ret == 0)
+			return false;
 		flush_uart(info->device_fd);
 	}
 
@@ -748,7 +747,6 @@ static bool zeus_read_response(struct cgpu_info *zeus)
 	if (info->current_work == NULL) {	// work was flushed before we read response
 		applog(LOG_DEBUG, "%s%d: Received nonce for flushed work",
 			zeus->drv->name, zeus->device_id);
-		mutex_unlock(&info->lock);
 		return true;
 	}
 
@@ -758,15 +756,15 @@ static bool zeus_read_response(struct cgpu_info *zeus)
 
 	core = (nonce & 0xe0000000) >> 29;		// core indicated by 3 highest bits
 	chip = (nonce & 0x1ff80000) >> (29 - info->chips_bit_num);
-	duration_s = tdiff(&info->workend, &info->workstart);
+	duration_ms = ms_tdiff(&info->workend, &info->workstart);
 
 	if (chip < ZEUS_MAX_CHIPS && core < ZEUS_CHIP_CORES) {
 		++info->nonce_count[chip][core];
 		if (!valid)
 			++info->error_count[chip][core];
 
-		if (valid && duration_s > 0) {
-			info->hashes_per_s = (nonce - nonce_range_start(info->cores_per_chip, info->chips_count_max, core, chip)) / duration_s * info->cores_per_chip * info->chips_count;
+		if (valid && duration_ms > 0) {
+			info->hashes_per_ms = (nonce - nonce_range_start(info->cores_per_chip, info->chips_count_max, core, chip)) / duration_ms * info->cores_per_chip * info->chips_count;
 			info->last_nonce = nonce;
 		}
 	} else {
@@ -811,8 +809,8 @@ static bool zeus_send_work(struct cgpu_info *zeus, struct work *work)
 {
 	struct ZEUS_INFO *info = zeus->device_data;
 	unsigned char cmdpkt[ZEUS_COMMAND_PKT_LEN];
-	uint32_t diff_code, diff;
 	int ret;
+	uint32_t diff_code, diff;
 
 	diff = work->work_difficulty;
 	if (diff < 1)
@@ -834,7 +832,8 @@ static bool zeus_send_work(struct cgpu_info *zeus, struct work *work)
 			ret != sizeof(cmdpkt))
 			return false;
 	} else {			// otherwise direct via serial port
-		if (zeus_serial_write(info->device_fd, cmdpkt, sizeof(cmdpkt)) < 0) {
+		ret = zeus_serial_write(info->device_fd, cmdpkt, sizeof(cmdpkt));
+		if (ret < 0) {
 			info->serial_reopen = true;
 			return false;
 		}
@@ -843,12 +842,13 @@ static bool zeus_send_work(struct cgpu_info *zeus, struct work *work)
 	return true;
 }
 
-static void *zeus_send_work_thread(void *data)
+static void *zeus_io_thread(void *data)
 {
 	struct cgpu_info *zeus = (struct cgpu_info *)data;
 	struct ZEUS_INFO *info = zeus->device_data;
 	char threadname[24];
 	struct timeval tv_now, tv_spent, tv_rem;
+	int retval;
 
 	snprintf(threadname, sizeof(threadname), "Zeus/%d", zeus->device_id);
 	RenameThread(threadname);
@@ -856,19 +856,16 @@ static void *zeus_send_work_thread(void *data)
 						zeus->drv->name, zeus->device_id, threadname);
 
 	while (likely(!zeus->shutdown)) {
-		if (unlikely(info->thr->pause || zeus->deven != DEV_ENABLED)) {
-			cgsem_wait(&info->wusem);
-			zeus_purge_work(zeus);
-			continue;
-		}
-
-		if (unlikely(using_libusb(info) && zeus->usbinfo.nodev))
-			break;
-
-		if (unlikely(using_serial(info) && info->serial_reopen)) {
-			if (!zeus_reopen(zeus))
+		if (unlikely(info->serial_reopen)) {
+			mutex_lock(&info->lock);
+			if (using_serial(info) && !zeus_reopen(zeus)) {
+				applog(LOG_ERR, "Failed to reopen %s%d on %s, shutting down",
+					zeus->drv->name, zeus->device_id, zeus->device_path);
+				mutex_unlock(&info->lock);
 				break;
+			}
 			info->serial_reopen = false;
+			mutex_unlock(&info->lock);
 			zeus_purge_work(zeus);
 		}
 
@@ -876,6 +873,7 @@ static void *zeus_send_work_thread(void *data)
 
 		mutex_lock(&info->lock);
 		if (info->current_work && !info->current_work->devflag) {
+			/* send task to device */
 			if (opt_zeus_debug)
 				applog(LOG_INFO, "Sending work");
 
@@ -905,9 +903,9 @@ static void *zeus_send_work_thread(void *data)
 			applog(LOG_DEBUG, "Remaining: %d.%06d", (int)tv_rem.tv_sec, (int)tv_rem.tv_usec);
 		}
 
-		// wait until we're signalled to update work or timeout expires
-		cgsem_mswait(&info->wusem, (tv_rem.tv_sec < 1) ? 1000 : tv_rem.tv_sec * 1000);
-		zeus_purge_work(zeus);
+		retval = cgsem_mswait(&info->wusem, (tv_rem.tv_sec < 1) ? 5000 : tv_rem.tv_sec * 1000);
+		if (retval == ETIMEDOUT)
+			zeus_purge_work(zeus);		// abandon current work
 	}
 
 	zeus->shutdown = true;
@@ -963,7 +961,7 @@ static bool zeus_thread_init(struct thr_info *thr)
 	struct cgpu_info *zeus = thr->cgpu;
 	struct ZEUS_INFO *info = zeus->device_data;
 
-	if (pthread_create(&info->sworkpth, NULL, zeus_send_work_thread, zeus)) {
+	if (pthread_create(&info->pth_io, NULL, zeus_io_thread, zeus)) {
 		applog(LOG_ERR, "%s%d: Failed to create I/O thread",
 				zeus->drv->name, zeus->device_id);
 		return false;
@@ -981,19 +979,10 @@ static int64_t zeus_scanwork(struct thr_info *thr)
 	double elapsed_s;
 	int64_t estimate_hashes;
 
-	if (unlikely(using_libusb(info) && zeus->usbinfo.nodev))
-		return -1;
-
-	if (unlikely(using_serial(info) && info->serial_reopen)) {
-		cgsleep_ms(500);
-		return 0;
-	}
-
-	if (unlikely(zeus_read_response(zeus) < 0))	// reads either from serial or libusb or times out
-		return 0;
+	zeus_read_response(zeus);       // reads either from serial or libusb or times out
 
 	if (thr->work_restart || thr->work_update) {
-		notify_send_work_thread(zeus);
+		zeus_purge_work(zeus);
 		thr->work_restart = false;
 		thr->work_update = false;
 	}
@@ -1003,7 +992,7 @@ static int64_t zeus_scanwork(struct thr_info *thr)
 	cgtime(&info->scanwork_time);
 	elapsed_s = tdiff(&info->scanwork_time, &old_scanwork_time);
 #ifdef ZEUS_LIVE_HASHRATE
-	estimate_hashes = elapsed_s * info->hashes_per_s;
+	estimate_hashes = elapsed_s * info->hashes_per_ms * 1000;
 #else
 	estimate_hashes = elapsed_s * info->golden_speed_per_core *
 				info->cores_per_chip * info->chips_count;
@@ -1019,7 +1008,7 @@ static int64_t zeus_scanwork(struct thr_info *thr)
 #define zeus_update_work zeus_flush_work
 static void zeus_flush_work(struct cgpu_info *zeus)
 {
-	notify_send_work_thread(zeus);
+	zeus_purge_work(zeus);
 	if (opt_zeus_debug)
 		applog(LOG_INFO, "zeus_flush_work: Tickling I/O thread");
 }
@@ -1058,7 +1047,7 @@ static struct api_data *zeus_api_stats(struct cgpu_info *zeus)
 		root = api_add_int(root, "chips_bit_num", &(info->chips_bit_num), false);
 		root = api_add_uint32(root, "read_count", &(info->read_count), false);
 
-		root = api_add_uint32(root, "hashes_per_s", &(info->hashes_per_s), false);
+		root = api_add_uint32(root, "hashes_per_ms", &(info->hashes_per_ms), false);
 		root = api_add_uint32(root, "last_nonce", &(info->last_nonce), false);
 		root = api_add_timeval(root, "last_nonce_time", &tv_diff2, false);
 	}
@@ -1117,18 +1106,12 @@ static char *zeus_set_device(struct cgpu_info *zeus, char *option, char *setting
 			return replybuf;
 		}
 
-		notify_send_work_thread(zeus);
+		zeus_purge_work(zeus);
 		return NULL;
 	}
 
 	sprintf(replybuf, "Unknown option: %s", option);
 	return replybuf;
-}
-
-static void zeus_thread_enable(struct thr_info *thr)
-{
-	struct cgpu_info *zeus = thr->cgpu;
-	notify_send_work_thread(zeus);
 }
 
 static void zeus_shutdown(struct thr_info *thr)
@@ -1138,7 +1121,7 @@ static void zeus_shutdown(struct thr_info *thr)
 
 	applog(LOG_NOTICE, "%s%d: Shutting down", zeus->drv->name, zeus->device_id);
 
-	pthread_join(info->sworkpth, NULL);
+	pthread_join(info->pth_io, NULL);
 	mutex_destroy(&info->lock);
 	cgsem_destroy(&info->wusem);
 
@@ -1163,6 +1146,5 @@ struct device_drv zeus_drv = {
 		.get_api_stats = zeus_api_stats,
 		.get_statline_before = zeus_get_statline_before,
 		.set_device = zeus_set_device,
-		.thread_enable = zeus_thread_enable,
 		.thread_shutdown = zeus_shutdown,
 };
