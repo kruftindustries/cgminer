@@ -1877,7 +1877,12 @@ static void gridseed_get_statline_before(char *buf, size_t siz, struct cgpu_info
 
 static void gridseed_get_statline(char *buf, size_t siz, struct cgpu_info *gridseed) {
 	GRIDSEED_INFO *info = gridseed->device_data;
-	if (info->per_chip_stats) {
+	/* With the per_chip_stats option, print the number of nonces
+	 * and (if applicable) HW errors per chip at the end of each
+	 * device's status line. This however only works for small numbers
+	 * of chips, otherwise the information extends off screen and
+	 * the string buffer could overflow */
+	if (info->per_chip_stats && info->chips <= GRIDSEED_DEFAULT_CHIPS * 2) {
 		int i;
 		tailsprintf(buf, siz, " N:");
 		for (i = 0; i < info->chips; ++i) {

@@ -79,6 +79,9 @@ Many thanks also to sling00 and LinuxETC for providing access to test hardware.
 	./configure --enable-scrypt --enable-gridseed
 	make
 
+Compatibility Note: The Gridseed driver is currently only compatible with Linux,
+and requires libusb to communicate with the miner (`--scan-serial` is not supported).
+
 GC3355-specific options can be specified via `--gridseed-options` or
 `"gridseed-options"` in the configuration file as a comma-separated list of
 sub-options:
@@ -87,7 +90,7 @@ sub-options:
 * freq - any frequency multiple of 12.5 MHz, non-integer frequencies rounded up (default 600)
 * pll_r, pll_f, pll_od - fine-grained frequency tuning; see below
 * chips - number of chips per device (default 5)
-* per_chip_stats - print per-chip nonce generations and hardware failures
+* per_chip_stats - print per-chip nonce generations and hardware failures (only for 5-chip models)
 * start_port - first port number for scrypt proxy mode (default 3350); see below
 * voltage - switch the voltage to the GC3355 chips; see below
 * led_off - turn off the LEDs on the Gridseed miner
