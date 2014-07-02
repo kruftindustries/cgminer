@@ -21,23 +21,23 @@
 #include <unistd.h>
 #include <math.h>
 
-#ifdef WIN32
-  #include "compat.h"
-  #include <windows.h>
-  #include <winsock2.h>
-  #include <io.h>
-#else
+#ifndef WIN32
   #include <sys/select.h>
   #include <termios.h>
   #include <sys/stat.h>
   #include <fcntl.h>
+#else
+  #include "compat.h"
+  #include <windows.h>
+  #include <winsock2.h>
+  #include <io.h>
 #endif /* WIN32 */
 
-#include "elist.h"
 #include "miner.h"
 #include "usbutils.h"
-#include "driver-gridseed.h"
+#include "elist.h"
 #include "util.h"
+#include "driver-gridseed.h"
 
 static const char *gridseed_version = "v3.8.5.20140210.02";
 
@@ -73,6 +73,26 @@ static void set_text_color(WORD color)
 }
 #endif
 
+#ifdef WIN32
+static char *win32strerror(DWORD err)
+{
+	static char errstr[256];
+	FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL, err,
+		MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPTSTR)&errstr, sizeof(errstr), NULL);
+	return errstr;
+}
+#endif
+
+#ifdef WIN32
+  #define sockclose(sock) closesocket(sock)
+  #define sockerror(err) ((err) == SOCKET_ERROR)
+  #define sockerrorstr() win32strerror(WSAGetLastError())
+#else
+  #define sockclose(sock) close(sock)
+  #define sockerror(err) ((err) < 0)
+  #define sockerrorstr() strerror(errno)
+#endif
+
 /*---------------------------------------------------------------------------------------*/
 
 static int gridseed_send_ping_packet(GRIDSEED_INFO *, struct sockaddr_in);
@@ -90,96 +110,117 @@ static int check_udp_port_in_use(short port)
 	struct sockaddr_in local;
 
 	sock = socket(AF_INET, SOCK_DGRAM, 0);
+#ifndef WIN32
 	if (sock < 0)
 		return -1;
+#else
+	if (sock == INVALID_SOCKET)
+		return -1;
+#endif
 
 	local.sin_family = AF_INET;
 	local.sin_port = htons(port);
 	local.sin_addr.s_addr = inet_addr("127.0.0.1");
-	if (bind(sock, (struct sockaddr*)&local, sizeof(local)) < 0) {
-		close(sock);
-		return -2;
+	if (sockerror(bind(sock, (struct sockaddr*)&local, sizeof(local)))) {
+		sockclose(sock);
+		return -1;
 	}
 
 	return sock;
 }
 
-static int gridseed_create_proxy(struct cgpu_info *gridseed, GRIDSEED_INFO *info)
+static void gridseed_create_proxy(struct cgpu_info *gridseed, GRIDSEED_INFO *info)
 {
 	int sock = info->sockltc;
 	short port = info->ltc_port;
 
-	if (sock > 0)
-		close(sock);
-
+	if (sock != -1)
+		sockclose(sock);
 	info->sockltc = -1;
+
 	while (true) {
 		sock = check_udp_port_in_use(port);
-		if (sock > 0)
+		if (sock > -1)
 			break;
 		port++;
 	}
+
 	info->sockltc = sock;
 	info->ltc_port = port;
 
 	applog(LOG_NOTICE, "Create scrypt proxy on %d/UDP for %s%d", info->ltc_port, gridseed->drv->name, gridseed->device_id);
-	return 0;
 }
 
-static int gridseed_find_proxy(GRIDSEED_INFO *info)
+static bool gridseed_find_proxy(GRIDSEED_INFO *info)
 {
 	struct sockaddr_in remote;
 	struct timeval tv_timeout;
+	GRIDSEED_PACKET packet;
 	fd_set rdfs;
-	int sock = info->sockltc;
+	int addrlen, n, sock = info->sockltc;
 	short port = info->ltc_port + 1000;
 
-	if (sock > 0)
-		close(sock);
-
+	if (sock != -1)
+		sockclose(sock);
 	info->sockltc = -1;
+
 	while (true) {
 		sock = check_udp_port_in_use(port);
-		if (sock > 0)
+		if (sock > -1)
 			break;
 		port++;
 	}
-	info->sockltc = sock;
 	info->ltc_port = port - 1000;
 
 	remote.sin_family = AF_INET;
 	remote.sin_port = htons(info->ltc_port);
 	remote.sin_addr.s_addr = inet_addr("127.0.0.1");
 
+	applog(LOG_INFO, "Checking for scrypt proxy on %d/UDP", info->ltc_port);
+
 	if (gridseed_send_ping_packet(info, remote) != 0)
-		return -1;
+		return false;
 
 	tv_timeout.tv_sec = 0;
 	tv_timeout.tv_usec = 500000;
 	FD_ZERO(&rdfs);
 	FD_SET(sock, &rdfs);
-	if (select(sock+1, &rdfs, NULL, NULL, &tv_timeout) != 1)
-		return -1;
+	if (select(sock+1, &rdfs, NULL, NULL, &tv_timeout) != 1) {
+		sockclose(sock);
+		return false;
+	}
+
+	addrlen = sizeof(remote);
+	n = recvfrom(sock, (char*)&packet, sizeof(packet), 0, (struct sockaddr *)&remote, (socklen_t *)&addrlen);
+	if (sockerror(n) || n != sizeof(packet)) {
+		sockclose(sock);
+		return false;
+	}
+
+	if (gridseed_send_ping_packet(info, remote) != 0)
+		return false;
 
 	//if (cgsem_mswait(&info->psem, 500) != 0)
-	//	return -1;
+	//	return false;
+
+	info->sockltc = sock;
 
 	applog(LOG_NOTICE, "Found scrypt proxy on %d/UDP", info->ltc_port);
-	return 0;
+	return true;
 }
 
 static int gridseed_send_ping_packet(GRIDSEED_INFO *info, struct sockaddr_in to)
 {
 	GRIDSEED_PACKET packet;
 
-	if (info->sockltc <= 0)
+	if (info->sockltc < 0)
 		return -1;
 
 	packet.type = PACKET_PING;
 
-	if (sendto(info->sockltc, &packet, sizeof(packet), 0, (struct sockaddr *)&to,
+	if (sendto(info->sockltc, (char*)&packet, sizeof(packet), 0, (struct sockaddr *)&to,
 			sizeof(to)) != sizeof(packet)) {
-		applog(LOG_WARNING, "Couldn't send ping packet: %s", strerror(errno));
+		applog(LOG_WARNING, "Couldn't send ping packet: %s", sockerrorstr());
 		return -1;
 	}
 
@@ -190,7 +231,7 @@ static int gridseed_send_info_packet(GRIDSEED_INFO *info, struct sockaddr_in to)
 {
 	GRIDSEED_PACKET packet;
 
-	if (info->sockltc <= 0)
+	if (info->sockltc < 0)
 		return -1;
 
 	packet.type = PACKET_INFO;
@@ -199,9 +240,9 @@ static int gridseed_send_info_packet(GRIDSEED_INFO *info, struct sockaddr_in to)
 	packet.info.modules = info->modules;
 	strncpy(packet.info.serial, info->serial, sizeof(packet.info.serial));
 
-	if (sendto(info->sockltc, &packet, sizeof(packet), 0, (struct sockaddr *)&to,
+	if (sendto(info->sockltc, (char*)&packet, sizeof(packet), 0, (struct sockaddr *)&to,
 			sizeof(to)) != sizeof(packet)) {
-		applog(LOG_WARNING, "Couldn't send info packet: %s", strerror(errno));
+		applog(LOG_WARNING, "Couldn't send info packet: %s", sockerrorstr());
 		return -1;
 	}
 
@@ -227,7 +268,7 @@ static bool gridseed_send_work_packet(GRIDSEED_INFO *info, struct work *work)
 {
 	GRIDSEED_PACKET packet;
 
-	if (info->sockltc <= 0)
+	if (info->sockltc < 0)
 		return false;
 
 	packet.type = PACKET_WORK;
@@ -236,9 +277,9 @@ static bool gridseed_send_work_packet(GRIDSEED_INFO *info, struct work *work)
 	memcpy(packet.work.data, work->data, sizeof(packet.work.data));
 	packet.work.id = work->id;
 
-	if (sendto(info->sockltc, &packet, sizeof(packet), 0, (struct sockaddr *)&(info->toaddr),
-			sizeof(info->toaddr)) != sizeof(packet)) {
-		applog(LOG_WARNING, "Couldn't send work packet: %s", strerror(errno));
+	if (sendto(info->sockltc, (char*)&packet, sizeof(packet), 0,
+		(struct sockaddr *)&(info->toaddr), sizeof(info->toaddr)) != sizeof(packet)) {
+		applog(LOG_WARNING, "Couldn't send work packet: %s", sockerrorstr());
 		return false;
 	}
 
@@ -261,7 +302,7 @@ static int gridseed_send_nonce_packet(GRIDSEED_INFO *info, unsigned char *data)
 	uint32_t nonce;
 	int workid;
 
-	if (info->sockltc <= 0)
+	if (info->sockltc < 0)
 		return -1;
 
 	memcpy(&workid, data+8, 4);
@@ -271,9 +312,9 @@ static int gridseed_send_nonce_packet(GRIDSEED_INFO *info, unsigned char *data)
 	packet.nonce.nonce = nonce;
 	packet.nonce.workid = workid;
 
-	if (sendto(info->sockltc, &packet, sizeof(packet), 0, (struct sockaddr *)&(info->toaddr),
+	if (sendto(info->sockltc, (char*)&packet, sizeof(packet), 0, (struct sockaddr *)&(info->toaddr),
 			sizeof(info->toaddr)) != sizeof(packet)) {
-		applog(LOG_WARNING, "Couldn't send nonce packet: %s", strerror(errno));
+		applog(LOG_WARNING, "Couldn't send nonce packet: %s", sockerrorstr());
 		return -1;
 	}
 
@@ -338,22 +379,22 @@ static void *gridseed_recv_packet(void *userdata)
 		if (n < 0) {
 			if (errno == EINTR)
 				continue;
-			applog(LOG_ERR, "Error calling select: %s", strerror(errno));
+			applog(LOG_ERR, "Error calling select: %s", sockerrorstr());
 			gridseed->shutdown = true;
 			break;
 		}
 
 		addrlen = sizeof(fromaddr);
-		n = recvfrom(sock, &packet, sizeof(packet), 0, (struct sockaddr *)&fromaddr, (socklen_t *)&addrlen);
-		if (n != sizeof(packet))
-			continue;
-		if (n < 0) {
+		n = recvfrom(sock, (char*)&packet, sizeof(packet), 0, (struct sockaddr *)&fromaddr, (socklen_t *)&addrlen);
+		if (sockerror(n)) {
 			if (errno == EINTR)
 				continue;
-			applog(LOG_ERR, "Error calling recvfrom: %s", strerror(errno));
+			applog(LOG_ERR, "Error calling recvfrom: %s", sockerrorstr());
 			gridseed->shutdown = true;
 			break;
 		}
+		if (n != sizeof(packet))
+			continue;
 		cgtime(&ts_packet);
 
 		switch (packet.type) {
@@ -1076,6 +1117,7 @@ static struct cgpu_info *gridseed_detect_one_scrypt_proxy()
 	memset(info->nonce_count, 0, sizeof(info->nonce_count));
 	memset(info->error_count, 0, sizeof(info->error_count));
 	set_freq_cmd(info, 0, 0, 0);
+	info->sockltc = -1;
 	info->ltc_port = GRIDSEED_PROXY_PORT;
 	cgsem_init(&info->psem);
 
@@ -1139,6 +1181,7 @@ static struct cgpu_info *gridseed_detect_one_usb(struct libusb_device *dev, stru
 	info->serial[sizeof(info->serial)-1] = '\0';
 	gridseed->unique_id = info->serial;
 	set_freq_cmd(info, 0, 0, 0);
+	info->sockltc = -1;
 	info->ltc_port = GRIDSEED_PROXY_PORT;
 	cgsem_init(&info->psem);
 
@@ -1669,7 +1712,6 @@ static bool gridseed_prepare(struct thr_info *thr)
 			cgtimer_time(&info->query_ts);
 			memset(&info->workqueue, 0, sizeof(struct work *)*GRIDSEED_SOFT_QUEUE_LEN);
 			info->workdone = 0;
-			info->sockltc = -1;
 
 			gridseed_create_proxy(gridseed, info);
 
@@ -1947,8 +1989,8 @@ static void gridseed_shutdown(struct thr_info *thr)
 	cgsem_destroy(&info->psem);
 	mutex_destroy(&info->qlock);
 	mutex_destroy(&info->lock);
-	if (info->sockltc > 0) {
-		close(info->sockltc);
+	if (info->sockltc != -1) {
+		sockclose(info->sockltc);
 		info->sockltc = -1;
 	}
 	if (info->mode != MODE_SCRYPT_DUAL)
