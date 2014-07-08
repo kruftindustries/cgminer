@@ -42,6 +42,93 @@
 #include "miner.h"
 #include "fpgautils.h"
 
+#ifdef WIN32
+ssize_t win32read(int fd, void *buf, size_t count)
+{
+	OVERLAPPED osRead = { 0 };
+	HANDLE fh;
+	DWORD win32errno;
+	size_t actual;
+	bool success = false;
+
+	fh = (HANDLE)_get_osfhandle(fd);
+	if (fh == INVALID_HANDLE_VALUE)
+		return -1;
+
+	// Create the overlapped event. Must be closed before exiting
+	// to avoid a handle leak.
+	osRead.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+	if (osRead.hEvent == NULL)
+		return -1;
+
+	// Issue read operation.
+	if (!ReadFile(fh, buf, count, &actual, &osRead)) {
+		win32errno = GetLastError();
+		if (win32errno != ERROR_IO_PENDING) {
+			success = false;
+		} else {
+			// Write is pending
+			if (!GetOverlappedResult(fh, &osRead, &actual, TRUE)) {
+				win32errno = GetLastError();
+				success = false;
+			} else {
+				// asynchronous read completed
+				success = true;
+			}
+		}
+	} else {
+		// read completed immediately
+		success = true;
+	}
+
+	CloseHandle(osRead.hEvent);
+	SetLastError(win32errno);
+	return (success) ? (ssize_t)actual : -1;
+}
+
+ssize_t win32write(int fd, const void *buf, size_t count)
+{
+	OVERLAPPED osWrite = { 0 };
+	HANDLE fh;
+	DWORD win32errno;
+	size_t actual;
+	bool success = false;
+
+	fh = (HANDLE)_get_osfhandle(fd);
+	if (fh == INVALID_HANDLE_VALUE)
+		return -1;
+
+	// Create this write operation's OVERLAPPED structure's hEvent.
+	osWrite.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+	if (osWrite.hEvent == NULL)
+		return -1;
+
+	// Issue read operation.
+	if (!WriteFile(fh, buf, count, &actual, &osWrite)) {
+		win32errno = GetLastError();
+		if (win32errno != ERROR_IO_PENDING) {
+			success = false;
+		} else {
+			// Write is pending
+			if (!GetOverlappedResult(fh, &osWrite, &actual, TRUE)) {
+				win32errno = GetLastError();
+				success = false;
+			} else {
+				// asynchronous read completed
+				success = true;
+			}
+		}
+	} else {
+		// read completed immediately
+		success = true;
+	}
+
+	CloseHandle(osWrite.hEvent);
+	SetLastError(win32errno);
+	return (success) ? (ssize_t)actual : -1;
+}
+#endif
+
 #ifdef HAVE_LIBUDEV
 int serial_autodetect_udev(detectone_func_t detectone, const char*prodname)
 {
