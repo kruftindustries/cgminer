@@ -36,6 +36,8 @@
 #define GRIDSEED_CRL_OFFSET		0x00
 #define GRIDSEED_ODR_OFFSET		0x0c
 
+#define GRIDSEED_USB_ID_MODEL_STR	"STM32 Virtual COM Port"
+
 #define transfer(gridseed, request_type, bRequest, wValue, wIndex, cmd) \
 		_transfer(gridseed, request_type, bRequest, wValue, wIndex, NULL, 0, cmd)
 
@@ -61,6 +63,9 @@ typedef struct s_gridseed_info {
 	enum sub_ident		ident;
 	uint32_t		fw_version;
 	char			serial[24];
+	int			device_fd;
+	int			using_libusb;
+	bool			serial_reopen;
 	// statistics
 	int			nonce_count[GRIDSEED_MAX_CHIPS];  // per chip
 	int			error_count[GRIDSEED_MAX_CHIPS];  // per chip
