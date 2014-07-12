@@ -209,7 +209,11 @@ static int zeus_serial_write(int fd, const void *buf, size_t len)
 #endif
 
 	while (total < len) {
+#ifndef WIN32
 		ret = write(fd, buf, len);
+#else
+		ret = win32write(fd, buf, len);
+#endif
 		if (ret < 0) {
 			applog(LOG_ERR, "zeus_serial_write (%d): error on write: %s", fd, strerror(errno));
 			return -1;
@@ -227,7 +231,11 @@ static int zeus_serial_read(int fd, void *buf, size_t len, int read_count, struc
 	int rc = 0;
 
 	while (total < len) {
+#ifndef WIN32
 		ret = read(fd, buf + total, len - total);
+#else
+		ret = win32read(fd, buf + total, len - total);
+#endif
 		if (ret < 0) {
 			applog(LOG_ERR, "zeus_serial_read (%d): error on read: %s", fd, strerror(errno));
 			return -1;

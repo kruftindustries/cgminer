@@ -554,7 +554,11 @@ static int gc3355_write(struct cgpu_info *gridseed, const void *buf, size_t len)
 			return -1;
 		}
 	} else {
+#ifndef WIN32
 		ret = write(info->device_fd, buf, len);
+#else
+		ret = win32write(info->device_fd, buf, len);
+#endif
 		if (ret < 0) {
 			applog(LOG_ERR, "%s%d: error on serial write (fd=%d): %s",
 					gridseed->drv->name, gridseed->device_id, info->device_fd, strerror(errno));
@@ -584,7 +588,11 @@ static int gc3355_read(struct cgpu_info *gridseed, void *buf, size_t len, int re
 				return -1;
 			}
 		} else {
+#ifndef WIN32
 			ret = read(info->device_fd, buf + total, len - total);
+#else
+			ret = win32read(info->device_fd, buf + total, len - total);
+#endif
 			if (ret < 0) {
 				applog(LOG_ERR, "%s%d: error on serial read (fd=%d): %s",
 						gridseed->drv->name, gridseed->device_id, info->device_fd, strerror(errno));
