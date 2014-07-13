@@ -1952,7 +1952,7 @@ static bool gridseed_prepare(struct thr_info *thr)
 
 			info->workdone = 0;
 			info->ltc_work = NULL;
-			info->hashes_per_ms = 0;
+			info->hashes_per_ms = GRIDSEED_HASH_SPEED * (double)(info->freq * info->chips * info->modules);
 			cgtime(&info->scanhash_time);
 
 			break;
@@ -2061,11 +2061,7 @@ static int64_t gridseed_scanwork_scrypt(struct thr_info *thr)
 	elapsed_ms = ms_tdiff(&info->scanhash_time, &old_scanhash_time);
 	mutex_unlock(&info->qlock);
 
-#if 0
-	return GRIDSEED_HASH_SPEED * (double)elapsed_ms * (double)(info->freq * info->chips * info->modules);
-#else
 	return info->hashes_per_ms * elapsed_ms;
-#endif
 }
 
 #define gridseed_update_work gridseed_flush_work

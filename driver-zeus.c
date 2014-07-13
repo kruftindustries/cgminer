@@ -972,6 +972,9 @@ static bool zeus_prepare(struct thr_info *thr)
 	mutex_init(&info->lock);
 	cgsem_init(&info->wusem);
 
+	// Use qualitative value until first result is returned
+	info->hashes_per_s = info->golden_speed_per_core * info->cores_per_chip * info->chips_count;
+
 	return true;
 }
 
@@ -989,7 +992,6 @@ static bool zeus_thread_init(struct thr_info *thr)
 	return true;
 }
 
-#define ZEUS_LIVE_HASHRATE 1
 static int64_t zeus_scanwork(struct thr_info *thr)
 {
 	struct cgpu_info *zeus = thr->cgpu;
@@ -1019,12 +1021,7 @@ static int64_t zeus_scanwork(struct thr_info *thr)
 	old_scanwork_time = info->scanwork_time;
 	cgtime(&info->scanwork_time);
 	elapsed_s = tdiff(&info->scanwork_time, &old_scanwork_time);
-#ifdef ZEUS_LIVE_HASHRATE
 	estimate_hashes = elapsed_s * info->hashes_per_s;
-#else
-	estimate_hashes = elapsed_s * info->golden_speed_per_core *
-				info->cores_per_chip * info->chips_count;
-#endif
 	mutex_unlock(&info->lock);
 
 	if (unlikely(estimate_hashes > 0xffffffff))
