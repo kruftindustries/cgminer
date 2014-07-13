@@ -1264,7 +1264,7 @@ static struct opt_table opt_config_table[] = {
 #ifdef HAVE_LIBCURL
 	OPT_WITH_ARG("--btc-address",
 		     opt_set_charp, NULL, &opt_btc_address,
-		     "Set bitcoin target address when solo mining to bitcoind (mandatory)"),
+		     "Set bitcoin target address when solo mining to bitcoind (optional)"),
 	OPT_WITH_ARG("--btc-sig",
 		     opt_set_charp, NULL, &opt_btc_sig,
 		     "Set signature to add to coinbase when solo mining (optional)"),
@@ -6616,11 +6616,11 @@ retry_stratum:
 
 	/* Probe for GBT support on first pass */
 	if (!pool->probed) {
+		bool append = false, submit = false, transactions = false;
 		applog(LOG_DEBUG, "Probing for GBT support");
 		val = json_rpc_call(curl, pool->rpc_url, pool->rpc_userpass,
 				    gbt_req, true, false, &rolltime, pool, false);
 		if (val) {
-			bool append = false, submit = false, transactions = false;
 			json_t *res_val, *mutables;
 			int i, mutsize = 0;
 
@@ -6651,7 +6651,7 @@ retry_stratum:
 			if (append && submit) {
 				pool->has_gbt = true;
 				pool->rpc_req = gbt_req;
-			} else if (transactions) {
+			} else if (transactions && opt_btc_address) {
 				pool->gbt_solo = true;
 				pool->rpc_req = gbt_solo_req;
 			}
@@ -6664,6 +6664,8 @@ retry_stratum:
 			applog(LOG_DEBUG, "GBT coinbase + append support found, switching to GBT protocol");
 		else if (pool->gbt_solo)
 			applog(LOG_DEBUG, "GBT coinbase without append found, switching to GBT solo protocol");
+		else if (transactions)
+			applog(LOG_DEBUG, "GBT found but no target address specified, falling back to getwork protocol");
 		else
 			applog(LOG_DEBUG, "No GBT coinbase + append support found, using getwork protocol");
 	}
