@@ -62,13 +62,13 @@ ssize_t win32read(int fd, void *buf, size_t count)
 		return -1;
 
 	// Issue read operation.
-	if (!ReadFile(fh, buf, count, &actual, &osRead)) {
+	if (!ReadFile(fh, buf, count, (PDWORD)&actual, &osRead)) {
 		win32errno = GetLastError();
 		if (win32errno != ERROR_IO_PENDING) {
 			success = false;
 		} else {
 			// Write is pending
-			if (!GetOverlappedResult(fh, &osRead, &actual, TRUE)) {
+			if (!GetOverlappedResult(fh, &osRead, (PDWORD)&actual, TRUE)) {
 				win32errno = GetLastError();
 				success = false;
 			} else {
@@ -104,13 +104,13 @@ ssize_t win32write(int fd, const void *buf, size_t count)
 		return -1;
 
 	// Issue read operation.
-	if (!WriteFile(fh, buf, count, &actual, &osWrite)) {
+	if (!WriteFile(fh, buf, count, (PDWORD)&actual, &osWrite)) {
 		win32errno = GetLastError();
 		if (win32errno != ERROR_IO_PENDING) {
 			success = false;
 		} else {
 			// Write is pending
-			if (!GetOverlappedResult(fh, &osWrite, &actual, TRUE)) {
+			if (!GetOverlappedResult(fh, &osWrite, (PDWORD)&actual, TRUE)) {
 				win32errno = GetLastError();
 				success = false;
 			} else {
@@ -401,10 +401,10 @@ void termios_debug(const char *devpath, struct termios *my_termios, const char *
 #endif
 #endif
 
-int serial_open_ex(const char *devpath, unsigned long baud, signed short timeout, signed short minbytes, bool purge)
+int serial_open_ex(const char *devpath, unsigned long baud, signed short timeout, signed short __maybe_unused minbytes, bool purge, bool win32overlapped)
 {
 #ifdef WIN32
-	HANDLE hSerial = CreateFile(devpath, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
+	HANDLE hSerial = CreateFile(devpath, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, (win32overlapped) ? FILE_FLAG_OVERLAPPED : 0, NULL);
 	if (unlikely(hSerial == INVALID_HANDLE_VALUE))
 	{
 		DWORD e = GetLastError();

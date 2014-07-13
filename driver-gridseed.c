@@ -471,8 +471,8 @@ static void _transfer(struct cgpu_info *gridseed, uint8_t request_type, uint8_t 
  * I/O helper functions
  ************************************************************/
 
-#define gridseed_serial_open_detect(devpath, baud, purge) serial_open_ex(devpath, baud, 2, 0, purge)
-#define gridseed_serial_open(devpath, baud, purge) serial_open_ex(devpath, baud, 2, 0, purge)
+#define gridseed_serial_open_detect(devpath, baud, purge) serial_open_ex(devpath, baud, 2, 0, purge, true)
+#define gridseed_serial_open(devpath, baud, purge) serial_open_ex(devpath, baud, 2, 0, purge, true)
 #define gridseed_serial_close(fd) close(fd)
 
 static bool gridseed_reopen(struct cgpu_info *gridseed)

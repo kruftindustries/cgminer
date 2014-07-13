@@ -150,8 +150,8 @@ static void notify_send_work_thread(struct cgpu_info *zeus)
  * I/O helper functions
  ************************************************************/
 
-#define zeus_serial_open_detect(devpath, baud, purge) serial_open_ex(devpath, baud, ZEUS_READ_FAULT_DECISECONDS, 0, purge)
-#define zeus_serial_open(devpath, baud, purge) serial_open_ex(devpath, baud, ZEUS_READ_FAULT_DECISECONDS, 0, purge)
+#define zeus_serial_open_detect(devpath, baud, purge) serial_open_ex(devpath, baud, ZEUS_READ_FAULT_DECISECONDS, 0, purge, true)
+#define zeus_serial_open(devpath, baud, purge) serial_open_ex(devpath, baud, ZEUS_READ_FAULT_DECISECONDS, 0, purge, true)
 #define zeus_serial_close(fd) close(fd)
 
 static bool zeus_reopen(struct cgpu_info *zeus)
