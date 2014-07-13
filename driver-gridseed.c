@@ -71,7 +71,7 @@ static const char *str_nofifo[] = {
 };
 
 #ifdef WIN32
-static void set_text_color(WORD color)
+static void __maybe_unused set_text_color(WORD color)
 {
 	SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), color);
 }
@@ -121,7 +121,7 @@ static int check_udp_port_in_use(short port)
 	if (sock < 0)
 		return -1;
 #else
-	if (sock == INVALID_SOCKET)
+	if ((unsigned int)sock == INVALID_SOCKET)
 		return -1;
 #endif
 
