@@ -249,7 +249,7 @@ static int gridseed_send_info_packet(GRIDSEED_INFO *info, struct sockaddr_in to)
 	packet.info.freq = info->freq;
 	packet.info.chips = info->chips;
 	packet.info.modules = info->modules;
-	strncpy(packet.info.serial, info->serial, sizeof(packet.info.serial));
+	strncpy(packet.info.id, info->id, sizeof(packet.info.id));
 
 	if (sendto(info->sockltc, (char*)&packet, sizeof(packet), 0, (struct sockaddr *)&to,
 			sizeof(to)) != sizeof(packet)) {
@@ -267,8 +267,8 @@ static void gridseed_recv_info_packet(struct cgpu_info *gridseed, GRIDSEED_INFO 
 	info->freq = packet.info.freq;
 	info->chips = packet.info.chips;
 	info->modules = packet.info.modules;
-	strncpy(info->serial, packet.info.serial, sizeof(info->serial));
-	gridseed->unique_id = info->serial;
+	strncpy(info->id, packet.info.id, sizeof(info->id));
+	gridseed->unique_id = info->id;
 	info->toaddr = from;
 	mutex_unlock(&info->qlock);
 
@@ -897,7 +897,7 @@ static void set_freq_cmd(GRIDSEED_INFO *info, int pll_r, int pll_f, int pll_od)
 	memcpy(info->cmd_btc_baud + 4, &cmdb, 4);
 }
 
-static bool get_options(GRIDSEED_INFO *info, char *options)
+static bool get_options(GRIDSEED_INFO *info, const char *options)
 {
 	char *ss, *p, *end, *comma, *eq;
 	int tmp, pll_r = 0, pll_f = 0, pll_od = 0;
@@ -977,7 +977,7 @@ next:
 	return true;
 }
 
-static bool get_freq(GRIDSEED_INFO *info, char *options)
+static bool get_freq(GRIDSEED_INFO *info, const char *options, const char *id)
 {
 	char *ss, *p, *end, *comma, *eq;
 	int tmp;
@@ -1000,7 +1000,7 @@ another:
 	*eq = '\0';
 
 	tmp = atoi(eq+1);
-	if (strcasecmp(p, info->serial)==0) {
+	if (strcasecmp(p, id) == 0) {
 		info->freq = tmp;
 		set_freq_cmd(info, 0, 0, 0);
 		if (info->freq == tmp)
@@ -1020,7 +1020,7 @@ next:
 	return true;
 }
 
-static bool get_override(GRIDSEED_INFO *info, char *options)
+static bool get_override(GRIDSEED_INFO *info, const char *options, const char *id)
 {
 	char *ss, *p, *colon, *semi;
 	bool ret = false;
@@ -1040,7 +1040,7 @@ static bool get_override(GRIDSEED_INFO *info, char *options)
 			continue;
 		*colon = '\0';
 
-		if (strcasecmp(p, info->serial) == 0) {
+		if (strcasecmp(p, id) == 0) {
 			ret = get_options(info, colon + 1);
 			break;
 		}
@@ -1309,8 +1309,8 @@ static bool gridseed_detect_one_common(struct cgpu_info *gridseed)
 	cgsem_init(&info->psem);
 
 	get_options(info, opt_gridseed_options);
-	get_freq(info, opt_gridseed_freq);
-	get_override(info, opt_gridseed_override);
+	get_freq(info, opt_gridseed_freq, gridseed->unique_id);
+	get_override(info, opt_gridseed_override, gridseed->unique_id);
 
 	/* get MCU firmware version */
 	hex2bin(detect_data, detect_cmd, sizeof(detect_data));
@@ -1334,8 +1334,8 @@ static bool gridseed_detect_one_common(struct cgpu_info *gridseed)
 		return false;
 
 	info->fw_version = le32toh(*(uint32_t *)(rbuf+GRIDSEED_READ_SIZE-4));
-	applog(LOG_NOTICE, "Gridseed device found, firmware v%08X, driver %s, serial %s",
-				info->fw_version, gridseed_version, info->serial);
+	applog(LOG_NOTICE, "Gridseed device found, firmware v%08X, driver %s, ID %s",
+				info->fw_version, gridseed_version, gridseed->unique_id);
 
 	gc3355_init(gridseed, info);
 
@@ -1364,9 +1364,9 @@ static struct cgpu_info *gridseed_detect_one_usb(struct libusb_device *dev, stru
 	info->device_fd = -1;
 	info->using_libusb = 1;
 
-	strncpy(info->serial, gridseed->usbdev->serial_string, sizeof(info->serial));
-	info->serial[sizeof(info->serial)-1] = '\0';
-	gridseed->unique_id = info->serial;
+	gridseed->unique_id = gridseed->usbdev->serial_string;
+	strncpy(info->id, gridseed->unique_id, sizeof(info->id));
+	info->id[sizeof(info->id) - 1] = '\0';
 
 	gridseed->usbdev->usb_type = USB_TYPE_STD;
 	if (gridseed_initialise_usb(gridseed, info)) {
@@ -1426,6 +1426,8 @@ static bool gridseed_detect_one_serial(const char *devpath)
 		gridseed->unique_id = gridseed->device_path;
 	else
 		++gridseed->unique_id;
+	strncpy(info->id, gridseed->unique_id, sizeof(info->id));
+	info->id[sizeof(info->id) - 1] = '\0';
 
 	if (gridseed_detect_one_common(gridseed))
 		return true;
@@ -2117,7 +2119,7 @@ static struct api_data *gridseed_api_stats(struct cgpu_info *gridseed)
 	}
 
 	root = api_add_string(root, "Mode", mode_str, false);
-	root = api_add_string(root, "Serial", info->serial, false);
+	root = api_add_string(root, "Serial", info->id, false);
 	root = api_add_int(root, "Frequency", &(info->freq), false);
 	root = api_add_int(root, "Baud", &(info->baud), false);
 	root = api_add_int(root, "Chips", &(info->chips), false);
@@ -2136,7 +2138,6 @@ static struct api_data *gridseed_api_stats(struct cgpu_info *gridseed)
 
 static void gridseed_get_statline_before(char *buf, size_t siz, struct cgpu_info *gridseed) {
 	GRIDSEED_INFO *info = gridseed->device_data;
-	//tailsprintf(buf, siz, "%s %4d MHz", info->serial, info->freq);
 	tailsprintf(buf, siz, "%4d MHz  ", info->freq);
 	if (info->mode == MODE_SHA256)
 		tailsprintf(buf, siz, "SHA256");

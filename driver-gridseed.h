@@ -62,7 +62,7 @@ typedef struct s_gridseed_info {
 	// device
 	enum sub_ident		ident;
 	uint32_t		fw_version;
-	char			serial[24];
+	char			id[24];
 	int			device_fd;
 	int			using_libusb;
 	bool			serial_reopen;
@@ -123,7 +123,7 @@ typedef struct s_gridseed_packet {
 	enum packet_type type;
 	union {
 		struct {
-			char serial[24];
+			char id[24];
 			int freq;
 			int chips;
 			int modules;
