@@ -200,6 +200,7 @@ static bool switch_status;
 static bool opt_submit_stale = true;
 static int opt_shares;
 bool opt_fail_only;
+static int opt_fail_switch_delay = 300;
 static bool opt_fix_protocol;
 bool opt_lowmem;
 bool opt_autofan;
@@ -1264,7 +1265,7 @@ static struct opt_table opt_config_table[] = {
 #ifdef HAVE_LIBCURL
 	OPT_WITH_ARG("--btc-address",
 		     opt_set_charp, NULL, &opt_btc_address,
-		     "Set bitcoin target address when solo mining to bitcoind (mandatory)"),
+		     "Set bitcoin target address when solo mining to bitcoind (optional)"),
 	OPT_WITH_ARG("--btc-sig",
 		     opt_set_charp, NULL, &opt_btc_sig,
 		     "Set signature to add to coinbase when solo mining (optional)"),
@@ -1302,6 +1303,9 @@ static struct opt_table opt_config_table[] = {
 	OPT_WITHOUT_ARG("--failover-only",
 			opt_set_bool, &opt_fail_only,
 			"Don't leak work to backup pools when primary pool is lagging"),
+	OPT_WITH_ARG("--failover-switch-delay",
+		     set_int_1_to_65535, opt_show_intval, &opt_fail_switch_delay,
+		     "Seconds that a failed pool must be alive again before switching back"),
 	OPT_WITHOUT_ARG("--fix-protocol",
 			opt_set_bool, &opt_fix_protocol,
 			"Do not redirect to a different getwork protocol (eg. stratum)"),
@@ -3236,7 +3240,8 @@ static bool submit_upstream_work(struct work *work, CURL *curl, bool resubmit)
 		endian_flip128(work->data, work->data);
 
 		/* build hex string */
-		hexstr = bin2hex(work->data, 118);
+		/* only 118 bytes are used, but *coind servers expect 128 byte hex strings */
+		hexstr = bin2hex(work->data, 128);
 		s = strdup("{\"method\": \"getwork\", \"params\": [ \"");
 		s = realloc_strcat(s, hexstr);
 		s = realloc_strcat(s, "\" ], \"id\":1}");
@@ -6616,11 +6621,11 @@ retry_stratum:
 
 	/* Probe for GBT support on first pass */
 	if (!pool->probed) {
+		bool append = false, submit = false, transactions = false;
 		applog(LOG_DEBUG, "Probing for GBT support");
 		val = json_rpc_call(curl, pool->rpc_url, pool->rpc_userpass,
 				    gbt_req, true, false, &rolltime, pool, false);
 		if (val) {
-			bool append = false, submit = false, transactions = false;
 			json_t *res_val, *mutables;
 			int i, mutsize = 0;
 
@@ -6651,7 +6656,7 @@ retry_stratum:
 			if (append && submit) {
 				pool->has_gbt = true;
 				pool->rpc_req = gbt_req;
-			} else if (transactions) {
+			} else if (transactions && opt_btc_address) {
 				pool->gbt_solo = true;
 				pool->rpc_req = gbt_solo_req;
 			}
@@ -6664,6 +6669,8 @@ retry_stratum:
 			applog(LOG_DEBUG, "GBT coinbase + append support found, switching to GBT protocol");
 		else if (pool->gbt_solo)
 			applog(LOG_DEBUG, "GBT coinbase without append found, switching to GBT solo protocol");
+		else if (transactions)
+			applog(LOG_DEBUG, "GBT found but no target address specified, falling back to getwork protocol");
 		else
 			applog(LOG_DEBUG, "No GBT coinbase + append support found, using getwork protocol");
 	}
@@ -8361,12 +8368,12 @@ static void *watchpool_thread(void __maybe_unused *userdata)
 			}
 
 			/* Only switch pools if the failback pool has been
-			 * alive for more than 5 minutes to prevent
+			 * alive for more than 5 minutes (default) to prevent
 			 * intermittently failing pools from being used. */
 			if (!pool->idle && pool_strategy == POOL_FAILOVER && pool->prio < cp_prio() &&
-			    now.tv_sec - pool->tv_idle.tv_sec > 300) {
-				applog(LOG_WARNING, "Pool %d %s stable for 5 mins",
-				       pool->pool_no, pool->rpc_url);
+			    now.tv_sec - pool->tv_idle.tv_sec > opt_fail_switch_delay) {
+				applog(LOG_WARNING, "Pool %d %s stable for %d seconds",
+				       pool->pool_no, pool->rpc_url, opt_fail_switch_delay);
 				switch_pools(NULL);
 			}
 		}

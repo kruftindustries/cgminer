@@ -345,6 +345,7 @@ AC_ARG_ENABLE([gridseed],
 	[gridseed=$enableval]
 	)
 if test "x$gridseed" = xyes; then
+	AC_DEFINE([USE_FPGA_SERIAL], [1], [Defined to 1 if serial support required])
 	AC_DEFINE([USE_GRIDSEED], [1], [Defined to 1 if GridSeed support is wanted])
 fi
 AM_CONDITIONAL([HAS_GRIDSEED], [test x$gridseed = xyes])
@@ -400,13 +401,13 @@ else
 	want_libbitfury=false
 fi
 
-if test x$zeus != xno; then
+if test x$gridseed$zeus != xnono; then
 	want_libudev=true
 else
 	want_libudev=false
 fi
 
-AM_CONDITIONAL([NEED_FPGAUTILS], [test x$avalon2$modminer$zeus != xnonono])
+AM_CONDITIONAL([NEED_FPGAUTILS], [test x$avalon2$modminer$gridseed$zeus != xnononono])
 AM_CONDITIONAL([WANT_USBUTILS], [test x$want_usbutils != xfalse])
 AM_CONDITIONAL([WANT_LIBBITFURY], [test x$want_libbitfury != xfalse])
 AM_CONDITIONAL([HAVE_CURSES], [test x$curses = xyes])

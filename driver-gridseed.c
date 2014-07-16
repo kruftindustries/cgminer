@@ -21,23 +21,27 @@
 #include <unistd.h>
 #include <math.h>
 
-#ifdef WIN32
-  #include "compat.h"
-  #include <windows.h>
-  #include <winsock2.h>
-  #include <io.h>
-#else
+#ifndef WIN32
   #include <sys/select.h>
   #include <termios.h>
   #include <sys/stat.h>
   #include <fcntl.h>
+#else
+  #include "compat.h"
+  #include <windows.h>
+  #include <winsock2.h>
+  #include <io.h>
 #endif /* WIN32 */
 
-#include "elist.h"
 #include "miner.h"
 #include "usbutils.h"
-#include "driver-gridseed.h"
+#include "fpgautils.h"
+#include "elist.h"
 #include "util.h"
+#include "driver-gridseed.h"
+
+#define using_libusb(info) ((info)->using_libusb > 0)
+#define using_serial(info) ((info)->using_libusb == 0)
 
 static const char *gridseed_version = "v3.8.5.20140210.02";
 
@@ -67,11 +71,35 @@ static const char *str_nofifo[] = {
 };
 
 #ifdef WIN32
-static void set_text_color(WORD color)
+static void __maybe_unused set_text_color(WORD color)
 {
 	SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), color);
 }
 #endif
+
+#ifdef WIN32
+static char *win32strerror(DWORD err)
+{
+	static char errstr[256];
+	FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS | FORMAT_MESSAGE_MAX_WIDTH_MASK,
+		NULL, err, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPTSTR)&errstr, sizeof(errstr), NULL);
+
+	return errstr;
+}
+#endif
+
+#ifdef WIN32
+  #define sockclose(sock) closesocket(sock)
+  #define sockerror(err) ((err) == SOCKET_ERROR)
+  #define sockerrorstr() win32strerror(WSAGetLastError())
+#else
+  #define sockclose(sock) close(sock)
+  #define sockerror(err) ((err) < 0)
+  #define sockerrorstr() strerror(errno)
+#endif
+
+// Unset upon first hotplug check
+static bool initial_startup_phase = true;
 
 /*---------------------------------------------------------------------------------------*/
 
@@ -90,96 +118,120 @@ static int check_udp_port_in_use(short port)
 	struct sockaddr_in local;
 
 	sock = socket(AF_INET, SOCK_DGRAM, 0);
+#ifndef WIN32
 	if (sock < 0)
 		return -1;
+#else
+	if ((unsigned int)sock == INVALID_SOCKET)
+		return -1;
+#endif
 
 	local.sin_family = AF_INET;
 	local.sin_port = htons(port);
 	local.sin_addr.s_addr = inet_addr("127.0.0.1");
-	if (bind(sock, (struct sockaddr*)&local, sizeof(local)) < 0) {
-		close(sock);
-		return -2;
+	if (sockerror(bind(sock, (struct sockaddr*)&local, sizeof(local)))) {
+		sockclose(sock);
+		return -1;
 	}
 
 	return sock;
 }
 
-static int gridseed_create_proxy(struct cgpu_info *gridseed, GRIDSEED_INFO *info)
+static void gridseed_create_proxy(struct cgpu_info *gridseed, GRIDSEED_INFO *info)
 {
 	int sock = info->sockltc;
 	short port = info->ltc_port;
 
-	if (sock > 0)
-		close(sock);
-
+	if (sock != -1)
+		sockclose(sock);
 	info->sockltc = -1;
+
 	while (true) {
 		sock = check_udp_port_in_use(port);
-		if (sock > 0)
+		if (sock > -1)
 			break;
 		port++;
 	}
+
 	info->sockltc = sock;
 	info->ltc_port = port;
 
 	applog(LOG_NOTICE, "Create scrypt proxy on %d/UDP for %s%d", info->ltc_port, gridseed->drv->name, gridseed->device_id);
-	return 0;
 }
 
-static int gridseed_find_proxy(GRIDSEED_INFO *info)
+static bool gridseed_find_proxy(GRIDSEED_INFO *info)
 {
 	struct sockaddr_in remote;
 	struct timeval tv_timeout;
+	GRIDSEED_PACKET packet;
 	fd_set rdfs;
-	int sock = info->sockltc;
+	int addrlen, n, sock = info->sockltc;
 	short port = info->ltc_port + 1000;
 
-	if (sock > 0)
-		close(sock);
-
+	if (sock != -1)
+		sockclose(sock);
 	info->sockltc = -1;
+
 	while (true) {
 		sock = check_udp_port_in_use(port);
-		if (sock > 0)
+		if (sock > -1)
 			break;
 		port++;
 	}
-	info->sockltc = sock;
 	info->ltc_port = port - 1000;
+	info->sockltc = sock;
 
 	remote.sin_family = AF_INET;
 	remote.sin_port = htons(info->ltc_port);
 	remote.sin_addr.s_addr = inet_addr("127.0.0.1");
 
-	if (gridseed_send_ping_packet(info, remote) != 0)
-		return -1;
+	applog(LOG_INFO, "Checking for scrypt proxy on %d/UDP", info->ltc_port);
+
+	if (gridseed_send_ping_packet(info, remote) != 0) {
+		sockclose(sock);
+		return false;
+	}
 
 	tv_timeout.tv_sec = 0;
 	tv_timeout.tv_usec = 500000;
 	FD_ZERO(&rdfs);
 	FD_SET(sock, &rdfs);
-	if (select(sock+1, &rdfs, NULL, NULL, &tv_timeout) != 1)
-		return -1;
+	if (select(sock+1, &rdfs, NULL, NULL, &tv_timeout) != 1) {
+		sockclose(sock);
+		return false;
+	}
+
+	addrlen = sizeof(remote);
+	n = recvfrom(sock, (char*)&packet, sizeof(packet), 0, (struct sockaddr *)&remote, (socklen_t *)&addrlen);
+	if (sockerror(n) || n != sizeof(packet)) {
+		sockclose(sock);
+		return false;
+	}
+
+	if (gridseed_send_ping_packet(info, remote) != 0) {
+		sockclose(sock);
+		return false;
+	}
 
 	//if (cgsem_mswait(&info->psem, 500) != 0)
-	//	return -1;
+	//	return false;
 
 	applog(LOG_NOTICE, "Found scrypt proxy on %d/UDP", info->ltc_port);
-	return 0;
+	return true;
 }
 
 static int gridseed_send_ping_packet(GRIDSEED_INFO *info, struct sockaddr_in to)
 {
 	GRIDSEED_PACKET packet;
 
-	if (info->sockltc <= 0)
+	if (info->sockltc < 0)
 		return -1;
 
 	packet.type = PACKET_PING;
 
-	if (sendto(info->sockltc, &packet, sizeof(packet), 0, (struct sockaddr *)&to,
+	if (sendto(info->sockltc, (char*)&packet, sizeof(packet), 0, (struct sockaddr *)&to,
 			sizeof(to)) != sizeof(packet)) {
-		applog(LOG_WARNING, "Couldn't send ping packet: %s", strerror(errno));
+		applog(LOG_WARNING, "Couldn't send ping packet: %s", sockerrorstr());
 		return -1;
 	}
 
@@ -190,18 +242,18 @@ static int gridseed_send_info_packet(GRIDSEED_INFO *info, struct sockaddr_in to)
 {
 	GRIDSEED_PACKET packet;
 
-	if (info->sockltc <= 0)
+	if (info->sockltc < 0)
 		return -1;
 
 	packet.type = PACKET_INFO;
 	packet.info.freq = info->freq;
 	packet.info.chips = info->chips;
 	packet.info.modules = info->modules;
-	strncpy(packet.info.serial, info->serial, sizeof(packet.info.serial));
+	strncpy(packet.info.id, info->id, sizeof(packet.info.id));
 
-	if (sendto(info->sockltc, &packet, sizeof(packet), 0, (struct sockaddr *)&to,
+	if (sendto(info->sockltc, (char*)&packet, sizeof(packet), 0, (struct sockaddr *)&to,
 			sizeof(to)) != sizeof(packet)) {
-		applog(LOG_WARNING, "Couldn't send info packet: %s", strerror(errno));
+		applog(LOG_WARNING, "Couldn't send info packet: %s", sockerrorstr());
 		return -1;
 	}
 
@@ -215,8 +267,8 @@ static void gridseed_recv_info_packet(struct cgpu_info *gridseed, GRIDSEED_INFO 
 	info->freq = packet.info.freq;
 	info->chips = packet.info.chips;
 	info->modules = packet.info.modules;
-	strncpy(info->serial, packet.info.serial, sizeof(info->serial));
-	gridseed->unique_id = info->serial;
+	strncpy(info->id, packet.info.id, sizeof(info->id));
+	gridseed->unique_id = info->id;
 	info->toaddr = from;
 	mutex_unlock(&info->qlock);
 
@@ -227,7 +279,7 @@ static bool gridseed_send_work_packet(GRIDSEED_INFO *info, struct work *work)
 {
 	GRIDSEED_PACKET packet;
 
-	if (info->sockltc <= 0)
+	if (info->sockltc < 0)
 		return false;
 
 	packet.type = PACKET_WORK;
@@ -236,9 +288,9 @@ static bool gridseed_send_work_packet(GRIDSEED_INFO *info, struct work *work)
 	memcpy(packet.work.data, work->data, sizeof(packet.work.data));
 	packet.work.id = work->id;
 
-	if (sendto(info->sockltc, &packet, sizeof(packet), 0, (struct sockaddr *)&(info->toaddr),
-			sizeof(info->toaddr)) != sizeof(packet)) {
-		applog(LOG_WARNING, "Couldn't send work packet: %s", strerror(errno));
+	if (sendto(info->sockltc, (char*)&packet, sizeof(packet), 0,
+		(struct sockaddr *)&(info->toaddr), sizeof(info->toaddr)) != sizeof(packet)) {
+		applog(LOG_WARNING, "Couldn't send work packet: %s", sockerrorstr());
 		return false;
 	}
 
@@ -261,7 +313,7 @@ static int gridseed_send_nonce_packet(GRIDSEED_INFO *info, unsigned char *data)
 	uint32_t nonce;
 	int workid;
 
-	if (info->sockltc <= 0)
+	if (info->sockltc < 0)
 		return -1;
 
 	memcpy(&workid, data+8, 4);
@@ -271,9 +323,9 @@ static int gridseed_send_nonce_packet(GRIDSEED_INFO *info, unsigned char *data)
 	packet.nonce.nonce = nonce;
 	packet.nonce.workid = workid;
 
-	if (sendto(info->sockltc, &packet, sizeof(packet), 0, (struct sockaddr *)&(info->toaddr),
+	if (sendto(info->sockltc, (char*)&packet, sizeof(packet), 0, (struct sockaddr *)&(info->toaddr),
 			sizeof(info->toaddr)) != sizeof(packet)) {
-		applog(LOG_WARNING, "Couldn't send nonce packet: %s", strerror(errno));
+		applog(LOG_WARNING, "Couldn't send nonce packet: %s", sockerrorstr());
 		return -1;
 	}
 
@@ -338,22 +390,22 @@ static void *gridseed_recv_packet(void *userdata)
 		if (n < 0) {
 			if (errno == EINTR)
 				continue;
-			applog(LOG_ERR, "Error calling select: %s", strerror(errno));
+			applog(LOG_ERR, "Error calling select: %s", sockerrorstr());
 			gridseed->shutdown = true;
 			break;
 		}
 
 		addrlen = sizeof(fromaddr);
-		n = recvfrom(sock, &packet, sizeof(packet), 0, (struct sockaddr *)&fromaddr, (socklen_t *)&addrlen);
-		if (n != sizeof(packet))
-			continue;
-		if (n < 0) {
+		n = recvfrom(sock, (char*)&packet, sizeof(packet), 0, (struct sockaddr *)&fromaddr, (socklen_t *)&addrlen);
+		if (sockerror(n)) {
 			if (errno == EINTR)
 				continue;
-			applog(LOG_ERR, "Error calling recvfrom: %s", strerror(errno));
+			applog(LOG_ERR, "Error calling recvfrom: %s", sockerrorstr());
 			gridseed->shutdown = true;
 			break;
 		}
+		if (n != sizeof(packet))
+			continue;
 		cgtime(&ts_packet);
 
 		switch (packet.type) {
@@ -392,6 +444,20 @@ static void *gridseed_recv_packet(void *userdata)
 
 /*---------------------------------------------------------------------------------------*/
 
+/************************************************************
+ * Utility Functions
+ ************************************************************/
+
+static void flush_uart(int fd)
+{
+#ifdef WIN32
+	const HANDLE fh = (HANDLE)_get_osfhandle(fd);
+	PurgeComm(fh, PURGE_RXCLEAR);
+#else
+	tcflush(fd, TCIFLUSH);
+#endif
+}
+
 static void _transfer(struct cgpu_info *gridseed, uint8_t request_type, uint8_t bRequest,
 		uint16_t wValue, uint16_t wIndex, uint32_t *data, int siz, enum usb_cmds cmd)
 {
@@ -405,11 +471,67 @@ static void _transfer(struct cgpu_info *gridseed, uint8_t request_type, uint8_t 
 			usb_cmdname(cmd), err);
 }
 
-static int gc3355_write(struct cgpu_info *gridseed, unsigned char *data, int size)
-{
-	int err, wrote;
+/************************************************************
+ * I/O helper functions
+ ************************************************************/
 
-#if 1
+#define gridseed_serial_open_detect(devpath, baud, purge) serial_open_ex(devpath, baud, 2, 0, purge, true)
+#define gridseed_serial_open(devpath, baud, purge) serial_open_ex(devpath, baud, 2, 0, purge, true)
+#define gridseed_serial_close(fd) close(fd)
+
+static bool gridseed_reopen(struct cgpu_info *gridseed)
+{
+	GRIDSEED_INFO *info = gridseed->device_data;
+	int try, fd = -1;
+
+	if (!using_serial(info))  // sanity check
+		return false;
+
+	if (info->device_fd != -1) {
+		applog(LOG_DEBUG, "Closing %s%d on %s (fd=%d)",
+			gridseed->drv->name, gridseed->device_id, gridseed->device_path, info->device_fd);
+		gridseed_serial_close(info->device_fd);
+		info->device_fd = -1;
+		cgsleep_ms(2000);
+	}
+
+	applog(LOG_DEBUG, "Attempting to open %s%d on %s",
+		gridseed->drv->name, gridseed->device_id, gridseed->device_path);
+
+	for (try = 0; try < 3; ++try) {
+		fd = gridseed_serial_open(gridseed->device_path, info->baud, true);
+		if (likely(fd > -1))
+			break;
+		cgsleep_ms(3000);
+	}
+
+	if (unlikely(fd < 0)) {
+		applog(LOG_ERR, "Failed to open %s%d on %s (%d attempts)",
+			gridseed->drv->name, gridseed->device_id, gridseed->device_path, try);
+		return false;
+	}
+
+	info->device_fd = fd;
+
+	applog(LOG_DEBUG, "Successfully opened %s%d on %s (%d attempts, fd=%d)",
+		gridseed->drv->name, gridseed->device_id, gridseed->device_path, try, info->device_fd);
+
+	return true;
+}
+
+static int gc3355_write(struct cgpu_info *gridseed, const void *buf, size_t len)
+{
+	GRIDSEED_INFO *info = gridseed->device_data;
+	ssize_t ret;
+	int err;
+
+	if (opt_debug) {
+		char *hexstr;
+		hexstr = bin2hex(buf, len);
+		applog(LOG_DEBUG, "> %s", hexstr);
+		free(hexstr);
+	}
+#if 0
 	if (!opt_quiet && opt_debug) {
 		int i;
 #ifndef WIN32
@@ -427,29 +549,80 @@ static int gc3355_write(struct cgpu_info *gridseed, unsigned char *data, int siz
 		fprintf(stderr, "\n");
 	}
 #endif
-	err = usb_write(gridseed, (char *)data, size, &wrote, C_SENDWORK);
-	if (err != LIBUSB_SUCCESS || wrote != size)
-		return -1;
 
-	cgsleep_ms(GRIDSEED_COMMAND_DELAY);
-	return 0;
-}
-
-#define gc3355_get_data(gridseed, buf, size) gc3355_read(gridseed, buf, size, NULL)
-static int gc3355_read(struct cgpu_info *gridseed, unsigned char *buf, int size, int *amount)
-{
-	int err = 0, offset = 0, end = 0;
-
-	while (offset == 0 && likely(!gridseed->shutdown)) {
-		err = usb_read_once_timeout(gridseed, (char *)buf + offset, size - offset, &end, 2000, C_GETRESULTS);
-		if (err && err != LIBUSB_ERROR_TIMEOUT)
-			break;
-		offset += end;
+	if (using_libusb(info)) {
+		err = usb_write(gridseed, (char *)buf, len, (int*)&ret, C_SENDWORK);
+		if (err != LIBUSB_SUCCESS || ret != (int)len) {
+			applog(LOG_ERR, "%s%d: error on USB write: %s",
+					gridseed->drv->name, gridseed->device_id, libusb_strerror(err));
+			return -1;
+		}
+	} else {
+#ifndef WIN32
+		ret = write(info->device_fd, buf, len);
+#else
+		ret = win32write(info->device_fd, buf, len);
+#endif
+		if (ret < 0) {
+			applog(LOG_ERR, "%s%d: error on serial write (fd=%d): %s",
+					gridseed->drv->name, gridseed->device_id, info->device_fd, strerror(errno));
+			info->serial_reopen = true;
+			return -1;
+		}
 	}
 
-	if (amount != NULL)
-		*amount = offset;
+	cgsleep_ms(GRIDSEED_COMMAND_DELAY);
+	return ret;
+}
 
+#define gc3355_get_data(gridseed, buf, len) gc3355_read(gridseed, buf, len, 1)
+static int gc3355_read(struct cgpu_info *gridseed, void *buf, size_t len, int read_count)
+{
+	GRIDSEED_INFO *info = gridseed->device_data;
+	ssize_t ret;
+	size_t total = 0;
+	int err, rc = 0;
+
+	while (total < len) {
+		if (using_libusb(info)) {
+			err = usb_read_once_timeout(gridseed, (char *)buf + total, len - total, (int*)&ret, 200, C_GETRESULTS);
+			if (err != LIBUSB_SUCCESS && err != LIBUSB_ERROR_TIMEOUT) {
+				applog(LOG_ERR, "%s%d: error on USB read: %s",
+						gridseed->drv->name, gridseed->device_id, libusb_strerror(err));
+				return -1;
+			}
+		} else {
+#ifndef WIN32
+			ret = read(info->device_fd, buf + total, len - total);
+#else
+			ret = win32read(info->device_fd, buf + total, len - total);
+#endif
+			if (ret < 0) {
+				applog(LOG_ERR, "%s%d: error on serial read (fd=%d): %s",
+						gridseed->drv->name, gridseed->device_id, info->device_fd, strerror(errno));
+				info->serial_reopen = true;
+				return -1;
+			}
+		}
+
+		if (ret == 0 && ++rc >= read_count)
+			break;
+
+		total += (size_t)ret;
+	}
+
+	if (opt_debug) {
+		char *hexstr;
+		if (total > 0) {
+			hexstr = bin2hex(buf, total);
+			applog(LOG_DEBUG, "< %s", hexstr);
+			free(hexstr);
+		} else {
+			applog(LOG_DEBUG, "< (no data)");
+		}
+	}
+
+#if 0
 	if (!opt_quiet && opt_debug) {
 		int i;
 #ifndef WIN32
@@ -466,11 +639,9 @@ static int gc3355_read(struct cgpu_info *gridseed, unsigned char *buf, int size,
 		}
 		fprintf(stderr, "\n");
 	}
+#endif
 
-	if (amount == NULL)
-		return !(size == offset);
-	else
-		return err;
+	return total;
 }
 
 static void gc3355_send_cmds(struct cgpu_info *gridseed, const char *cmds[])
@@ -509,12 +680,12 @@ static bool gc3355_read_register(struct cgpu_info *gridseed, uint32_t reg_addr,
 	*(uint32_t *)(cmd + 4) = htole32(reg_addr);
 	*(uint32_t *)(cmd + 8) = htole32(reg_len);
 	*(uint32_t *)(cmd + 12) = htole32(reg_len);
-	if (gc3355_write(gridseed, cmd, sizeof(cmd))) {
+	if (gc3355_write(gridseed, cmd, sizeof(cmd)) != sizeof(cmd)) {
 		applog(LOG_DEBUG, "Failed to write data to %s%d", gridseed->drv->name, gridseed->device_id);
 		return false;
 	}
 
-	if (gc3355_get_data(gridseed, buf, 4)) {
+	if (gc3355_get_data(gridseed, buf, 4) != 4) {
 		applog(LOG_DEBUG, "No response from %s%d", gridseed->drv->name, gridseed->device_id);
 		return false;
 	}
@@ -538,12 +709,12 @@ static bool gc3355_write_register(struct cgpu_info *gridseed, uint32_t reg_addr,
 	*(uint32_t *)(cmd + 4) = htole32(reg_addr);
 	*(uint32_t *)(cmd + 8) = htole32(reg_value);
 	*(uint32_t *)(cmd + 12) = htole32(reg_len);
-	if (gc3355_write(gridseed, cmd, sizeof(cmd)) != 0) {
+	if (gc3355_write(gridseed, cmd, sizeof(cmd)) != sizeof(cmd)) {
 		applog(LOG_DEBUG, "Failed to write data to %s%d", gridseed->drv->name, gridseed->device_id);
 		return false;
 	}
 
-	if (gc3355_get_data(gridseed, buf, 4)) {
+	if (gc3355_get_data(gridseed, buf, 4) != 4) {
 		applog(LOG_DEBUG, "No response from %s%d", gridseed->drv->name, gridseed->device_id);
 		return false;
 	}
@@ -673,8 +844,12 @@ static void gc3355_init(struct cgpu_info *gridseed, GRIDSEED_INFO *info)
 	applog(LOG_NOTICE, "%s%d: System reseting", gridseed->drv->name, gridseed->device_id);
 	gc3355_send_cmds(gridseed, str_reset);
 	cgsleep_ms(200);
-	usb_buffer_clear(gridseed);
-	usb_read_timeout(gridseed, buf, sizeof(buf), &amount, 10, C_GETRESULTS);
+	if (using_libusb(info)) {
+		usb_buffer_clear(gridseed);
+		usb_read_timeout(gridseed, buf, sizeof(buf), &amount, 10, C_GETRESULTS);
+	} else {
+		flush_uart(info->device_fd);
+	}
 	gc3355_send_cmds(gridseed, str_init);
 	gc3355_send_cmds(gridseed, str_ltc_reset);
 	gc3355_set_core_freq(gridseed);
@@ -722,7 +897,7 @@ static void set_freq_cmd(GRIDSEED_INFO *info, int pll_r, int pll_f, int pll_od)
 	memcpy(info->cmd_btc_baud + 4, &cmdb, 4);
 }
 
-static bool get_options(GRIDSEED_INFO *info, char *options)
+static bool get_options(GRIDSEED_INFO *info, const char *options)
 {
 	char *ss, *p, *end, *comma, *eq;
 	int tmp, pll_r = 0, pll_f = 0, pll_od = 0;
@@ -802,7 +977,7 @@ next:
 	return true;
 }
 
-static bool get_freq(GRIDSEED_INFO *info, char *options)
+static bool get_freq(GRIDSEED_INFO *info, const char *options, const char *id)
 {
 	char *ss, *p, *end, *comma, *eq;
 	int tmp;
@@ -825,7 +1000,7 @@ another:
 	*eq = '\0';
 
 	tmp = atoi(eq+1);
-	if (strcasecmp(p, info->serial)==0) {
+	if (strcasecmp(p, id) == 0) {
 		info->freq = tmp;
 		set_freq_cmd(info, 0, 0, 0);
 		if (info->freq == tmp)
@@ -845,7 +1020,7 @@ next:
 	return true;
 }
 
-static bool get_override(GRIDSEED_INFO *info, char *options)
+static bool get_override(GRIDSEED_INFO *info, const char *options, const char *id)
 {
 	char *ss, *p, *colon, *semi;
 	bool ret = false;
@@ -865,7 +1040,7 @@ static bool get_override(GRIDSEED_INFO *info, char *options)
 			continue;
 		*colon = '\0';
 
-		if (strcasecmp(p, info->serial) == 0) {
+		if (strcasecmp(p, id) == 0) {
 			ret = get_options(info, colon + 1);
 			break;
 		}
@@ -1013,7 +1188,7 @@ static int gridseed_pl2303_init(struct cgpu_info *gridseed, int interface)
 	return 0;
 }
 
-static int gridseed_initialise(struct cgpu_info *gridseed, GRIDSEED_INFO *info)
+static int gridseed_initialise_usb(struct cgpu_info *gridseed, GRIDSEED_INFO *info)
 {
 	int err, interface;
 
@@ -1050,17 +1225,20 @@ static struct cgpu_info *gridseed_detect_one_scrypt_proxy()
 	struct cgpu_info *gridseed;
 	GRIDSEED_INFO *info;
 
-	gridseed = calloc(1, sizeof(*gridseed));
+	gridseed = calloc(1, sizeof(struct cgpu_info));
 	if (unlikely(!gridseed))
-		return NULL;
-	info = calloc(1, sizeof(*info));
+		quit(1, "Failed to calloc struct cgpu_info");
+	info = calloc(1, sizeof(GRIDSEED_INFO));
 	if (unlikely(!info))
-		goto shin;
+		quit(1, "Failed to calloc struct GRIDSEED_INFO");
 
 	gridseed->drv = &gridseed_drv;
-	gridseed->threads = GRIDSEED_MINER_THREADS;
+	gridseed->device_data = info;
 	gridseed->deven = DEV_ENABLED;
-	gridseed->device_data = (void *)info;
+	gridseed->threads = GRIDSEED_MINER_THREADS;
+
+	info->device_fd = -1;
+	info->using_libusb = 0;
 
 	info->mode = MODE_SCRYPT_DUAL;
 
@@ -1073,51 +1251,39 @@ static struct cgpu_info *gridseed_detect_one_scrypt_proxy()
 	info->voltage = 0;
 	info->led = 0;
 	info->per_chip_stats = 0;
+
 	memset(info->nonce_count, 0, sizeof(info->nonce_count));
 	memset(info->error_count, 0, sizeof(info->error_count));
+
 	set_freq_cmd(info, 0, 0, 0);
+	info->sockltc = -1;
 	info->ltc_port = GRIDSEED_PROXY_PORT;
 	cgsem_init(&info->psem);
 
 	get_options(info, opt_gridseed_options);
 
-	if (gridseed_find_proxy(info))
-		goto unshin;
+	if (!gridseed_find_proxy(info))
+		goto unallocall;
 
 	if (!add_cgpu(gridseed))
-		goto unshin;
+		goto unallocall;
 
 	return gridseed;
 
-unshin:
-	free(info);
+unallocall:
+	free(gridseed->device_data);
 	gridseed->device_data = NULL;
-
-shin:
 	free(gridseed);
+
 	return NULL;
 }
 
-static struct cgpu_info *gridseed_detect_one_usb(struct libusb_device *dev, struct usb_find_devices *found)
+static bool gridseed_detect_one_common(struct cgpu_info *gridseed)
 {
-	struct cgpu_info *gridseed;
-	GRIDSEED_INFO *info;
+	GRIDSEED_INFO *info = gridseed->device_data;
 	unsigned char rbuf[GRIDSEED_READ_SIZE];
 	const char detect_cmd[] = "55aac000909090900000000001000000";
 	unsigned char detect_data[16];
-
-	gridseed = usb_alloc_cgpu(&gridseed_drv, GRIDSEED_MINER_THREADS);
-	if (!usb_init(gridseed, dev, found))
-		goto shin;
-
-	libusb_reset_device(gridseed->usbdev->handle);
-
-	info = (GRIDSEED_INFO*)calloc(1, sizeof(GRIDSEED_INFO));
-	if (unlikely(!info))
-		quit(1, "Failed to calloc gridseed_info data");
-	gridseed->device_data = (void *)info;
-
-	update_usb_stats(gridseed);
 
 	if (opt_scrypt)
 		info->mode = MODE_SCRYPT;
@@ -1133,53 +1299,83 @@ static struct cgpu_info *gridseed_detect_one_usb(struct libusb_device *dev, stru
 	info->voltage = 0;
 	info->led = 0;
 	info->per_chip_stats = 0;
+
 	memset(info->nonce_count, 0, sizeof(info->nonce_count));
 	memset(info->error_count, 0, sizeof(info->error_count));
-	strncpy(info->serial, gridseed->usbdev->serial_string, sizeof(info->serial));
-	info->serial[sizeof(info->serial)-1] = '\0';
-	gridseed->unique_id = info->serial;
+
 	set_freq_cmd(info, 0, 0, 0);
+	info->sockltc = -1;
 	info->ltc_port = GRIDSEED_PROXY_PORT;
 	cgsem_init(&info->psem);
 
 	get_options(info, opt_gridseed_options);
-	get_freq(info, opt_gridseed_freq);
-	get_override(info, opt_gridseed_override);
-
-	gridseed->usbdev->usb_type = USB_TYPE_STD;
-	if (gridseed_initialise(gridseed, info)) {
-		applog(LOG_ERR, "Failed to initialize gridseed device");
-		goto unshin;
-	}
+	get_freq(info, opt_gridseed_freq, gridseed->unique_id);
+	get_override(info, opt_gridseed_override, gridseed->unique_id);
 
 	/* get MCU firmware version */
 	hex2bin(detect_data, detect_cmd, sizeof(detect_data));
-	if (gc3355_write(gridseed, detect_data, sizeof(detect_data))) {
+	if (gc3355_write(gridseed, detect_data, sizeof(detect_data)) != sizeof(detect_data)) {
 		applog(LOG_DEBUG, "Failed to write detect command to gridseed device");
-		goto unshin;
+		return false;
 	}
 
 	/* waiting for return */
-	if (gc3355_get_data(gridseed, rbuf, GRIDSEED_READ_SIZE)) {
+	if (gc3355_get_data(gridseed, rbuf, GRIDSEED_READ_SIZE) != GRIDSEED_READ_SIZE) {
 		applog(LOG_DEBUG, "No response from gridseed device");
-		goto unshin;
+		return false;
 	}
 
 	if (memcmp(rbuf, "\x55\xaa\xc0\x00\x90\x90\x90\x90", GRIDSEED_READ_SIZE-4) != 0) {
 		applog(LOG_DEBUG, "Bad response from gridseed device");
-		goto unshin;
+		return false;
 	}
 
 	if (!add_cgpu(gridseed))
-		goto unshin;
+		return false;
 
 	info->fw_version = le32toh(*(uint32_t *)(rbuf+GRIDSEED_READ_SIZE-4));
-	applog(LOG_NOTICE, "Gridseed device found, firmware v%08X, driver %s, serial %s",
-				info->fw_version, gridseed_version, info->serial);
+	applog(LOG_NOTICE, "Gridseed device found, firmware v%08X, driver %s, ID %s",
+				info->fw_version, gridseed_version, gridseed->unique_id);
 
 	gc3355_init(gridseed, info);
 
-	return gridseed;
+	return true;
+}
+
+static struct cgpu_info *gridseed_detect_one_usb(struct libusb_device *dev, struct usb_find_devices *found)
+{
+	struct cgpu_info *gridseed;
+	GRIDSEED_INFO *info;
+
+	gridseed = usb_alloc_cgpu(&gridseed_drv, GRIDSEED_MINER_THREADS);
+	if (!usb_init(gridseed, dev, found))
+		goto shin;
+
+	libusb_reset_device(gridseed->usbdev->handle);
+
+	info = calloc(1, sizeof(GRIDSEED_INFO));
+	if (unlikely(!info))
+		quit(1, "Failed to calloc struct GRIDSEED_INFO");
+
+	update_usb_stats(gridseed);
+
+	gridseed->device_data = info;
+
+	info->device_fd = -1;
+	info->using_libusb = 1;
+
+	gridseed->unique_id = gridseed->usbdev->serial_string;
+	strncpy(info->id, gridseed->unique_id, sizeof(info->id));
+	info->id[sizeof(info->id) - 1] = '\0';
+
+	gridseed->usbdev->usb_type = USB_TYPE_STD;
+	if (gridseed_initialise_usb(gridseed, info)) {
+		applog(LOG_ERR, "Failed to initialize gridseed device");
+		goto unshin;
+	}
+
+	if (gridseed_detect_one_common(gridseed))
+		return gridseed;
 
 unshin:
 	usb_uninit(gridseed);
@@ -1189,6 +1385,58 @@ unshin:
 shin:
 	gridseed = usb_free_cgpu(gridseed);
 	return NULL;
+}
+
+static bool gridseed_detect_one_serial(const char *devpath)
+{
+	struct cgpu_info *gridseed;
+	GRIDSEED_INFO *info;
+	int fd;
+
+	if (initial_startup_phase)
+		applog(LOG_INFO, "Gridseed Detect: Attempting to open %s", devpath);
+
+	fd = gridseed_serial_open_detect(devpath, GRIDSEED_DEFAULT_BAUD, true);
+	if (unlikely(fd == -1)) {
+		if (initial_startup_phase)
+			applog(LOG_ERR, "Gridseed Detect: Failed to open %s", devpath);
+		return false;
+	}
+
+	flush_uart(fd);
+
+	gridseed = calloc(1, sizeof(struct cgpu_info));
+	if (unlikely(!gridseed))
+		quit(1, "Failed to calloc struct cgpu_info");
+	info = calloc(1, sizeof(GRIDSEED_INFO));
+	if (unlikely(!info))
+		quit(1, "Failed to calloc struct GRIDSEED_INFO");
+
+	gridseed->drv = &gridseed_drv;
+	gridseed->device_path = strdup(devpath);
+	gridseed->device_data = info;
+	gridseed->deven = DEV_ENABLED;
+	gridseed->threads = GRIDSEED_MINER_THREADS;
+
+	info->device_fd = fd;
+	info->using_libusb = 0;
+
+	gridseed->unique_id = strrchr(gridseed->device_path, '/');
+	if (gridseed->unique_id == NULL)
+		gridseed->unique_id = gridseed->device_path;
+	else
+		++gridseed->unique_id;
+	strncpy(info->id, gridseed->unique_id, sizeof(info->id));
+	info->id[sizeof(info->id) - 1] = '\0';
+
+	if (gridseed_detect_one_common(gridseed))
+		return true;
+
+	free(gridseed->device_data);
+	gridseed->device_data = NULL;
+	free(gridseed);
+
+	return false;
 }
 
 static bool gridseed_send_query_cmd(struct cgpu_info *gridseed, GRIDSEED_INFO *info)
@@ -1206,7 +1454,7 @@ static bool gridseed_send_query_cmd(struct cgpu_info *gridseed, GRIDSEED_INFO *i
 #else
 		if (ts_res.QuadPart > 10000000) {
 #endif
-			if (gc3355_write(gridseed, cmd, 16) == 0) {
+			if (gc3355_write(gridseed, cmd, 16) == 16) {
 				info->query_qlen = true;
 				ret = true;
 			}
@@ -1243,7 +1491,7 @@ static bool gridseed_send_work_usb(struct cgpu_info *gridseed,
 	}
 
 	ret = gc3355_write(gridseed, cmd, (SHA256_MODE(mode)) ? SHA256_TASK_LEN : SCRYPT_TASK_LEN);
-	return (ret == 0);
+	return (ret == (SHA256_MODE(mode)) ? SHA256_TASK_LEN : SCRYPT_TASK_LEN);
 }
 
 static bool gridseed_send_work(struct cgpu_info *gridseed, GRIDSEED_INFO *info,
@@ -1541,26 +1789,24 @@ static void *gridseed_recv_usb(void *userdata)
 	struct thr_info *thr = info->thr;
 	char threadname[24];
 	unsigned char readbuf[GRIDSEED_READBUF_SIZE];
-	int offset = 0, amount, ret;
+	int offset = 0, amount;
 
 	snprintf(threadname, sizeof(threadname), "GridSeed_Recv/%d", gridseed->device_id);
 	RenameThread(threadname);
 	applog(LOG_INFO, "GridSeed: recv thread running, %s", threadname);
 
-	while(likely(!gridseed->shutdown)) {
-		if (unlikely(gridseed->usbinfo.nodev)) {
-			applog(LOG_ERR, "%s%d: Device disappeared, shutting down",
-				gridseed->drv->name, gridseed->device_id);
-			gridseed->shutdown = true;
+	while (likely(!gridseed->shutdown)) {
+		if (unlikely(using_libusb(info) && gridseed->usbinfo.nodev))
 			break;
-		}
 
-		ret = gc3355_read(gridseed, readbuf + offset, GRIDSEED_READ_SIZE, &amount);
-		if (ret && ret != LIBUSB_ERROR_TIMEOUT) {
-			applog(LOG_ERR, "%s%d: Read error %d, read %d", gridseed->drv->name,
-				gridseed->device_id, ret, amount);
+		if (unlikely(info->serial_reopen)) {
+			cgsleep_ms(500);
 			continue;
 		}
+
+		amount = gc3355_read(gridseed, readbuf + offset, GRIDSEED_READ_SIZE, 1);
+		if (amount < 0)
+			continue;
 		offset += amount;
 
 		if (offset >= GRIDSEED_READ_SIZE)
@@ -1571,6 +1817,8 @@ static void *gridseed_recv_usb(void *userdata)
 			offset = 0;
 		}
 	}
+
+	gridseed->shutdown = true;
 	return NULL;
 }
 
@@ -1588,7 +1836,19 @@ static void *gridseed_send(void *userdata)
 	RenameThread(threadname);
 	applog(LOG_INFO, "GridSeed: send thread running, %s", threadname);
 
-	while(likely(!gridseed->shutdown)) {
+	while (likely(!gridseed->shutdown)) {
+		if (unlikely(using_libusb(info) && gridseed->usbinfo.nodev))
+			break;
+
+		if (unlikely(info->serial_reopen)) {
+			if (using_serial(info) && !gridseed_reopen(gridseed)) {
+				applog(LOG_ERR, "Failed to reopen %s%d on %s, shutting down",
+					gridseed->drv->name, gridseed->device_id, gridseed->device_path);
+				break;
+			}
+			info->serial_reopen = false;
+		}
+
 		if (SHA256_MODE(info->mode)) {
 			cgsleep_ms(50);
 
@@ -1637,10 +1897,28 @@ static void *gridseed_send(void *userdata)
 static int64_t gridseed_scanwork_sha(struct thr_info *);
 static int64_t gridseed_scanwork_scrypt(struct thr_info *);
 
+static int gridseed_autoscan()
+{
+	applog(LOG_DEBUG, "gridseed_autoscan() called");
+	return serial_autodetect_udev(gridseed_detect_one_serial, GRIDSEED_USB_ID_MODEL_STR);
+}
+
 static void gridseed_detect(bool __maybe_unused hotplug)
 {
-	applog(LOG_DEBUG, "[1;32mEntering[0m %s", __FUNCTION__);
-	usb_detect(&gridseed_drv, gridseed_detect_one_usb);
+	static int serial_usb = 0;
+
+	if (initial_startup_phase && hotplug)
+		initial_startup_phase = false;
+
+	// -1 : USB , 1 : Serial
+	if (serial_usb == 0)
+		serial_usb = (list_empty(&scan_devices)) ? -1 : 1;
+
+	if (serial_usb < 0)
+		usb_detect(&gridseed_drv, gridseed_detect_one_usb);
+	else
+		serial_detect_iauto(&gridseed_drv, gridseed_detect_one_serial, gridseed_autoscan);
+
 	if (!total_devices && opt_scrypt)
 		while (gridseed_detect_one_scrypt_proxy()) {}
 }
@@ -1669,7 +1947,6 @@ static bool gridseed_prepare(struct thr_info *thr)
 			cgtimer_time(&info->query_ts);
 			memset(&info->workqueue, 0, sizeof(struct work *)*GRIDSEED_SOFT_QUEUE_LEN);
 			info->workdone = 0;
-			info->sockltc = -1;
 
 			gridseed_create_proxy(gridseed, info);
 
@@ -1681,7 +1958,7 @@ static bool gridseed_prepare(struct thr_info *thr)
 
 			info->workdone = 0;
 			info->ltc_work = NULL;
-			info->hashes_per_ms = 0;
+			info->hashes_per_ms = GRIDSEED_HASH_SPEED * (double)(info->freq * info->chips * info->modules);
 			cgtime(&info->scanhash_time);
 
 			break;
@@ -1718,9 +1995,11 @@ static bool gridseed_thread_init(struct thr_info *thr)
 		return false;
 	}
 
-	if (pthread_create(&info->th_packet, NULL, gridseed_recv_packet, (void*)gridseed)) {
-		applog(LOG_ERR, "%s%d: Failed to create packet thread", gridseed->drv->name, gridseed->device_id);
-		return -1;
+	if (info->sockltc != -1) {
+		if (pthread_create(&info->th_packet, NULL, gridseed_recv_packet, (void*)gridseed)) {
+			applog(LOG_ERR, "%s%d: Failed to create packet thread", gridseed->drv->name, gridseed->device_id);
+			return -1;
+		}
 	}
 
 	return true;
@@ -1788,11 +2067,7 @@ static int64_t gridseed_scanwork_scrypt(struct thr_info *thr)
 	elapsed_ms = ms_tdiff(&info->scanhash_time, &old_scanhash_time);
 	mutex_unlock(&info->qlock);
 
-#if 0
-	return GRIDSEED_HASH_SPEED * (double)elapsed_ms * (double)(info->freq * info->chips * info->modules);
-#else
 	return info->hashes_per_ms * elapsed_ms;
-#endif
 }
 
 #define gridseed_update_work gridseed_flush_work
@@ -1844,7 +2119,7 @@ static struct api_data *gridseed_api_stats(struct cgpu_info *gridseed)
 	}
 
 	root = api_add_string(root, "Mode", mode_str, false);
-	root = api_add_string(root, "Serial", info->serial, false);
+	root = api_add_string(root, "Serial", info->id, false);
 	root = api_add_int(root, "Frequency", &(info->freq), false);
 	root = api_add_int(root, "Baud", &(info->baud), false);
 	root = api_add_int(root, "Chips", &(info->chips), false);
@@ -1863,7 +2138,6 @@ static struct api_data *gridseed_api_stats(struct cgpu_info *gridseed)
 
 static void gridseed_get_statline_before(char *buf, size_t siz, struct cgpu_info *gridseed) {
 	GRIDSEED_INFO *info = gridseed->device_data;
-	//tailsprintf(buf, siz, "%s %4d MHz", info->serial, info->freq);
 	tailsprintf(buf, siz, "%4d MHz  ", info->freq);
 	if (info->mode == MODE_SHA256)
 		tailsprintf(buf, siz, "SHA256");
@@ -1947,8 +2221,8 @@ static void gridseed_shutdown(struct thr_info *thr)
 	cgsem_destroy(&info->psem);
 	mutex_destroy(&info->qlock);
 	mutex_destroy(&info->lock);
-	if (info->sockltc > 0) {
-		close(info->sockltc);
+	if (info->sockltc != -1) {
+		sockclose(info->sockltc);
 		info->sockltc = -1;
 	}
 	if (info->mode != MODE_SCRYPT_DUAL)

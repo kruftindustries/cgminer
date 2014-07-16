@@ -150,8 +150,8 @@ static void notify_send_work_thread(struct cgpu_info *zeus)
  * I/O helper functions
  ************************************************************/
 
-#define zeus_serial_open_detect(devpath, baud, purge) serial_open_ex(devpath, baud, ZEUS_READ_FAULT_DECISECONDS, 0, purge)
-#define zeus_serial_open(devpath, baud, purge) serial_open_ex(devpath, baud, ZEUS_READ_FAULT_DECISECONDS, 0, purge)
+#define zeus_serial_open_detect(devpath, baud, purge) serial_open_ex(devpath, baud, ZEUS_READ_FAULT_DECISECONDS, 0, purge, true)
+#define zeus_serial_open(devpath, baud, purge) serial_open_ex(devpath, baud, ZEUS_READ_FAULT_DECISECONDS, 0, purge, true)
 #define zeus_serial_close(fd) close(fd)
 
 static bool zeus_reopen(struct cgpu_info *zeus)
@@ -209,7 +209,11 @@ static int zeus_serial_write(int fd, const void *buf, size_t len)
 #endif
 
 	while (total < len) {
+#ifndef WIN32
 		ret = write(fd, buf, len);
+#else
+		ret = win32write(fd, buf, len);
+#endif
 		if (ret < 0) {
 			applog(LOG_ERR, "zeus_serial_write (%d): error on write: %s", fd, strerror(errno));
 			return -1;
@@ -227,7 +231,11 @@ static int zeus_serial_read(int fd, void *buf, size_t len, int read_count, struc
 	int rc = 0;
 
 	while (total < len) {
+#ifndef WIN32
 		ret = read(fd, buf + total, len - total);
+#else
+		ret = win32read(fd, buf + total, len - total);
+#endif
 		if (ret < 0) {
 			applog(LOG_ERR, "zeus_serial_read (%d): error on read: %s", fd, strerror(errno));
 			return -1;
@@ -964,6 +972,9 @@ static bool zeus_prepare(struct thr_info *thr)
 	mutex_init(&info->lock);
 	cgsem_init(&info->wusem);
 
+	// Use qualitative value until first result is returned
+	info->hashes_per_s = info->golden_speed_per_core * info->cores_per_chip * info->chips_count;
+
 	return true;
 }
 
@@ -981,7 +992,6 @@ static bool zeus_thread_init(struct thr_info *thr)
 	return true;
 }
 
-#define ZEUS_LIVE_HASHRATE 1
 static int64_t zeus_scanwork(struct thr_info *thr)
 {
 	struct cgpu_info *zeus = thr->cgpu;
@@ -1011,12 +1021,7 @@ static int64_t zeus_scanwork(struct thr_info *thr)
 	old_scanwork_time = info->scanwork_time;
 	cgtime(&info->scanwork_time);
 	elapsed_s = tdiff(&info->scanwork_time, &old_scanwork_time);
-#ifdef ZEUS_LIVE_HASHRATE
 	estimate_hashes = elapsed_s * info->hashes_per_s;
-#else
-	estimate_hashes = elapsed_s * info->golden_speed_per_core *
-				info->cores_per_chip * info->chips_count;
-#endif
 	mutex_unlock(&info->lock);
 
 	if (unlikely(estimate_hashes > 0xffffffff))

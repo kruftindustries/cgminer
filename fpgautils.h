@@ -18,6 +18,11 @@
 typedef bool(*detectone_func_t)(const char*);
 typedef int(*autoscan_func_t)();
 
+#ifdef WIN32
+extern ssize_t win32read(int fd, void *buf, size_t count);
+extern ssize_t win32write(int fd, const void *buf, size_t count);
+#endif
+
 extern int _serial_detect(struct device_drv *drv, detectone_func_t, autoscan_func_t, bool force_autoscan, bool inhibit_autoscan);
 #define serial_detect_fauto(drv, detectone, autoscan)  \
 	_serial_detect(drv, detectone, autoscan, true, false)
@@ -30,8 +35,8 @@ extern int _serial_detect(struct device_drv *drv, detectone_func_t, autoscan_fun
 extern int serial_autodetect_devserial(detectone_func_t, const char *prodname);
 extern int serial_autodetect_udev(detectone_func_t, const char *prodname);
 
-#define serial_open(dev,baud,timeout,purge) serial_open_ex(dev, baud, timeout, 0, purge)
-extern int serial_open_ex(const char *devpath, unsigned long baud, signed short timeout, signed short minbytes, bool purge);
+#define serial_open(dev,baud,timeout,purge) serial_open_ex(dev, baud, timeout, 0, purge, false)
+extern int serial_open_ex(const char *devpath, unsigned long baud, signed short timeout, signed short minbytes, bool purge, bool win32overlapped);
 extern ssize_t _serial_read(int fd, char *buf, size_t buflen, char *eol);
 #define serial_read(fd, buf, count)  \
 	_serial_read(fd, (char*)(buf), count, NULL)

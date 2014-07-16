@@ -23,16 +23,19 @@ ID,chips,clock tuples can be joined together separated by semi-colons.
 ### Device Selection ###
 
 With no `--scan-serial` options the driver will use libusb to autodetect any
-connected miners and to perform all device I/O operations. This is the
-recommended method if multiple drivers are compiled into cgminer.
+connected miners and to perform all device I/O operations. ~~This is the
+recommended method if multiple drivers are compiled into cgminer.~~
+Current production lots use a different USB-Serial chip for which the driver
+has not been fully updated yet. Using libusb will result in poor performance.
+Use one of the other options below.
 
 If `--scan-serial zeus:auto` is specified, the driver will use libudev to
-identify which USB-serial ports (if any) are from a Zeus miner and open those
-ports directly. All I/O will be done using direct serial reads and writes
-(not through libusb). This method may not work properly if multiple drivers
-are enabled. This method is only available on Linux.
+identify which USB-serial ports are from a Zeus miner and open those ports
+directly. All I/O will be done using direct serial reads and writes
+(not through libusb). This method is not recommended if multiple drivers
+are compiled. This method is only available on Linux.
 
-Individual devices can be specified manually using `--scan-serial zeus:/dev/ttyX`
+Finally, devices can be specified manually using `--scan-serial zeus:/dev/ttyX`
 (note the "zeus:" is optional if only the Zeus driver has been compiled in). This
 disables autodetection (for the Zeus driver only) and all I/O will also be done
 using direct serial reads and writes instead of through libusb.
@@ -48,9 +51,6 @@ The following three examples are equivalent assuming three miners are connected:
 	# Direct serial I/O, manual port specification
 	./cgminer --scrypt --zeus-chips 96 --zeus-clock 328 --scan-serial /dev/ttyUSB0 \
 		--scan-serial /dev/ttyUSB1 --scan-serial /dev/ttyUSB2
-
-The different methods are provided to accomodate different systems or preferences
-and as fallback.
 
 ### Device Identification ###
 
@@ -78,9 +78,6 @@ Many thanks also to sling00 and LinuxETC for providing access to test hardware.
 	./autogen.sh
 	./configure --enable-scrypt --enable-gridseed
 	make
-
-Compatibility Note: The Gridseed driver is currently only compatible with Linux,
-and requires libusb to communicate with the miner (`--scan-serial` is not supported).
 
 GC3355-specific options can be specified via `--gridseed-options` or
 `"gridseed-options"` in the configuration file as a comma-separated list of
