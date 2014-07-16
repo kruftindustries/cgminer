@@ -36,7 +36,7 @@
 #define GRIDSEED_CRL_OFFSET		0x00
 #define GRIDSEED_ODR_OFFSET		0x0c
 
-#define GRIDSEED_USB_ID_MODEL_STR	"STM32 Virtual COM Port"
+#define GRIDSEED_USB_ID_MODEL_STR	"STM32_Virtual_COM_Port"
 
 #define transfer(gridseed, request_type, bRequest, wValue, wIndex, cmd) \
 		_transfer(gridseed, request_type, bRequest, wValue, wIndex, NULL, 0, cmd)

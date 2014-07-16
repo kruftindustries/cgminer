@@ -81,8 +81,9 @@ static void __maybe_unused set_text_color(WORD color)
 static char *win32strerror(DWORD err)
 {
 	static char errstr[256];
-	FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL, err,
-		MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPTSTR)&errstr, sizeof(errstr), NULL);
+	FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS | FORMAT_MESSAGE_MAX_WIDTH_MASK,
+		NULL, err, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPTSTR)&errstr, sizeof(errstr), NULL);
+
 	return errstr;
 }
 #endif
@@ -178,6 +179,7 @@ static bool gridseed_find_proxy(GRIDSEED_INFO *info)
 		port++;
 	}
 	info->ltc_port = port - 1000;
+	info->sockltc = sock;
 
 	remote.sin_family = AF_INET;
 	remote.sin_port = htons(info->ltc_port);
@@ -185,8 +187,10 @@ static bool gridseed_find_proxy(GRIDSEED_INFO *info)
 
 	applog(LOG_INFO, "Checking for scrypt proxy on %d/UDP", info->ltc_port);
 
-	if (gridseed_send_ping_packet(info, remote) != 0)
+	if (gridseed_send_ping_packet(info, remote) != 0) {
+		sockclose(sock);
 		return false;
+	}
 
 	tv_timeout.tv_sec = 0;
 	tv_timeout.tv_usec = 500000;
@@ -204,13 +208,13 @@ static bool gridseed_find_proxy(GRIDSEED_INFO *info)
 		return false;
 	}
 
-	if (gridseed_send_ping_packet(info, remote) != 0)
+	if (gridseed_send_ping_packet(info, remote) != 0) {
+		sockclose(sock);
 		return false;
+	}
 
 	//if (cgsem_mswait(&info->psem, 500) != 0)
 	//	return false;
-
-	info->sockltc = sock;
 
 	applog(LOG_NOTICE, "Found scrypt proxy on %d/UDP", info->ltc_port);
 	return true;
@@ -1258,7 +1262,7 @@ static struct cgpu_info *gridseed_detect_one_scrypt_proxy()
 
 	get_options(info, opt_gridseed_options);
 
-	if (gridseed_find_proxy(info))
+	if (!gridseed_find_proxy(info))
 		goto unallocall;
 
 	if (!add_cgpu(gridseed))
