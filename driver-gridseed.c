@@ -522,8 +522,7 @@ static bool gridseed_reopen(struct cgpu_info *gridseed)
 static int gc3355_write(struct cgpu_info *gridseed, const void *buf, size_t len)
 {
 	GRIDSEED_INFO *info = gridseed->device_data;
-	ssize_t ret;
-	int err;
+	int ret, err;
 
 	if (opt_debug) {
 		char *hexstr;
@@ -551,10 +550,14 @@ static int gc3355_write(struct cgpu_info *gridseed, const void *buf, size_t len)
 #endif
 
 	if (using_libusb(info)) {
-		err = usb_write(gridseed, (char *)buf, len, (int*)&ret, C_SENDWORK);
-		if (err != LIBUSB_SUCCESS || ret != (int)len) {
+		err = usb_write(gridseed, (char *)buf, len, &ret, C_SENDWORK);
+		if (err != LIBUSB_SUCCESS) {
 			applog(LOG_ERR, "%s%d: error on USB write: %s",
 					gridseed->drv->name, gridseed->device_id, libusb_strerror(err));
+			return -1;
+		} else if (ret < 0 || (size_t)ret != len) {
+			applog(LOG_ERR, "%s%d: usb_write length mismatch: %zu != %d",
+					gridseed->drv->name, gridseed->device_id, len, ret);
 			return -1;
 		}
 	} else {
