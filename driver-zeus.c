@@ -294,6 +294,9 @@ static void zeus_get_device_options(const char *devid, int *chips_count, int *ch
 	char *p, *all, *found = NULL;
 	long lval;
 	int index = 0;
+	char *lastslsh = MAX(strrchr(devid, '/'), strrchr(devid, '\\'));
+	if (lastslsh != NULL)
+		++lastslsh;
 
 	// set global default options
 	*chips_count = (opt_zeus_chips_count) ? opt_zeus_chips_count : ZEUS_MIN_CHIPS;
@@ -306,6 +309,10 @@ static void zeus_get_device_options(const char *devid, int *chips_count, int *ch
 
 	for (p = strtok(all, ";"); p != NULL; p = strtok(NULL, ";")) {
 		if (strncmp(p, devid, strlen(devid)) == 0) {
+			found = p;
+			break;
+		}
+		if (lastslsh != NULL && strncmp(p, lastslsh, strlen(lastslsh)) == 0) {
 			found = p;
 			break;
 		}
@@ -666,7 +673,9 @@ static bool zeus_detect_one_serial(const char *devpath)
 
 	info->device_fd = -1;
 	info->using_libusb = 0;
-	zeus->unique_id = strrchr(zeus->device_path, '/');
+
+	zeus->unique_id = MAX(	strrchr(zeus->device_path, '/'),
+				strrchr(zeus->device_path, '\\'));
 	if (zeus->unique_id == NULL)
 		zeus->unique_id = zeus->device_path;
 	else

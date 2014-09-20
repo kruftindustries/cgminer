@@ -1424,7 +1424,8 @@ static bool gridseed_detect_one_serial(const char *devpath)
 	info->device_fd = fd;
 	info->using_libusb = 0;
 
-	gridseed->unique_id = strrchr(gridseed->device_path, '/');
+	gridseed->unique_id = MAX( strrchr(gridseed->device_path, '/'),
+				   strrchr(gridseed->device_path, '\\'));
 	if (gridseed->unique_id == NULL)
 		gridseed->unique_id = gridseed->device_path;
 	else
