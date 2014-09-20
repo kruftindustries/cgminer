@@ -401,7 +401,7 @@ void termios_debug(const char *devpath, struct termios *my_termios, const char *
 #endif
 #endif
 
-int serial_open_ex(const char *devpath, unsigned long baud, signed short timeout, signed short __maybe_unused minbytes, bool purge, bool win32overlapped)
+int serial_open_ex(const char *devpath, unsigned long baud, signed short timeout, signed short __maybe_unused minbytes, bool purge, bool __maybe_unused win32overlapped)
 {
 #ifdef WIN32
 	HANDLE hSerial = CreateFile(devpath, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, (win32overlapped) ? FILE_FLAG_OVERLAPPED : 0, NULL);
