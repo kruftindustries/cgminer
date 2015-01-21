@@ -1399,16 +1399,16 @@ void check_extranonce_option(struct pool *pool, char * url)
 {
 	char extra_op[16],*extra_op_loc;
 	extra_op_loc = strstr(url,"#");
-        if(extra_op_loc && !pool->extranonce_subscribe)
-        {
-                strcpy(extra_op, extra_op_loc);
-                *extra_op_loc = '\0';
+	if(extra_op_loc && !pool->extranonce_subscribe)
+	{
+		strcpy(extra_op, extra_op_loc);
+		*extra_op_loc = '\0';
 		if(!strcmp(extra_op,"#xnsub"))
 		{
 			pool->extranonce_subscribe = true;
 			applog(LOG_DEBUG, "Pool %d extranonce subscribe enabled.", pool->pool_no);
 		}
-        }
+	}
 	return;
 }
 
@@ -1907,33 +1907,33 @@ static bool parse_diff(struct pool *pool, json_t *val)
 
 static bool parse_extranonce(struct pool *pool, json_t *val)
 {
-        int n2size;
+	int n2size;
 	char* nonce1;
-        
-        nonce1 = json_array_string(val, 0);
-        if (!valid_hex(nonce1)) {
-                applog(LOG_INFO, "Failed to get valid nonce1 in parse_extranonce");
-                goto out;
-        }
-        n2size = json_integer_value(json_array_get(val, 1));
-        if (n2size < 2 || n2size > 16) {
-                applog(LOG_INFO, "Failed to get valid n2size in parse_extranonce");
-                free(nonce1);
-                goto out;
-        }
 
-        cg_wlock(&pool->data_lock);
-        pool->nonce1 = nonce1;
-        pool->n1_len = strlen(nonce1) / 2;
-        free(pool->nonce1bin);
-        pool->nonce1bin = calloc(pool->n1_len, 1);
-        if (unlikely(!pool->nonce1bin))
-                quithere(1, "Failed to calloc pool->nonce1bin");
-        hex2bin(pool->nonce1bin, pool->nonce1, pool->n1_len);
-        pool->n2size = n2size;
+	nonce1 = json_array_string(val, 0);
+	if (!valid_hex(nonce1)) {
+		applog(LOG_INFO, "Failed to get valid nonce1 in parse_extranonce");
+		goto out;
+	}
+	n2size = json_integer_value(json_array_get(val, 1));
+	if (n2size < 2 || n2size > 16) {
+		applog(LOG_INFO, "Failed to get valid n2size in parse_extranonce");
+		free(nonce1);
+		goto out;
+	}
+
+	cg_wlock(&pool->data_lock);
+	pool->nonce1 = nonce1;
+	pool->n1_len = strlen(nonce1) / 2;
+	free(pool->nonce1bin);
+	pool->nonce1bin = calloc(pool->n1_len, 1);
+	if (unlikely(!pool->nonce1bin))
+		quithere(1, "Failed to calloc pool->nonce1bin");
+	hex2bin(pool->nonce1bin, pool->nonce1, pool->n1_len);
+	pool->n2size = n2size;
 	applog(LOG_NOTICE, "Pool %d confirmed mining.extranonce.subscribe with extranonce1 %s extran2size %d",
-                               pool->pool_no, pool->nonce1, pool->n2size);
-        cg_wunlock(&pool->data_lock);
+				pool->pool_no, pool->nonce1, pool->n2size);
+	cg_wunlock(&pool->data_lock);
 	return true;
 out:
 	return false;
@@ -2589,11 +2589,11 @@ void extranonce_subscribe_stratum(struct pool *pool)
 {
 	char s[RBUFSIZE];
 	if(pool->extranonce_subscribe)
-        {
-        	sprintf(s,"{\"id\": %d, \"method\": \"mining.extranonce.subscribe\", \"params\": []}", swork_id++);
+	{
+		sprintf(s,"{\"id\": %d, \"method\": \"mining.extranonce.subscribe\", \"params\": []}", swork_id++);
 		applog(LOG_INFO, "Send extranonce.subscribe for stratum pool %d", pool->pool_no);
-                stratum_send(pool, s, strlen(s));
-        }
+		stratum_send(pool, s, strlen(s));
+	}
 }
 
 bool initiate_stratum(struct pool *pool)
