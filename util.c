@@ -1397,13 +1397,14 @@ double tdiff(struct timeval *end, struct timeval *start)
 
 void check_extranonce_option(struct pool *pool, char * url)
 {
-	char extra_op[16],*extra_op_loc;
-	extra_op_loc = strstr(url,"#");
-	if(extra_op_loc && !pool->extranonce_subscribe)
+	char extra_op[16], *extra_op_loc;
+	extra_op_loc = strstr(url, "#");
+	if (extra_op_loc && !pool->extranonce_subscribe)
 	{
-		strcpy(extra_op, extra_op_loc);
+		strncpy(extra_op, extra_op_loc, sizeof(extra_op));
+		extra_op[sizeof(extra_op) - 1] = '\0';
 		*extra_op_loc = '\0';
-		if(!strcmp(extra_op,"#xnsub"))
+		if (!strcmp(extra_op, "#xnsub"))
 		{
 			pool->extranonce_subscribe = true;
 			applog(LOG_DEBUG, "Pool %d extranonce subscribe enabled.", pool->pool_no);
