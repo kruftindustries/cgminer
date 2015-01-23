@@ -13,58 +13,73 @@ Scrypt algorithm code was ported from CGMiner version 3.7.2.
 	./configure --enable-scrypt --enable-zeus
 	make
 
-The Zeus driver needs to be configured with two runtime options: the number of
-chips per ASIC device with `--zeus-chips` and the desired clock speed in MHz
-with `--zeus-clock`. These options are applied to all Zeus miners. To set options
-for a specific device use `--zeus-options ID,chips,clock` where ID specifies
-the device (see below) and chips and clock set the respective options. Multiple
-ID,chips,clock tuples can be joined together separated by semi-colons.
+### Option Summary ###
+
+```
+  --zeus-chips <chips>   Default number of chips per device
+  --zeus-clock <clock>   Default chip clock speed (MHz)
+
+  --zeus-options <ID>,<chips>,<clock>[;<ID>,<chips>,<clock>...]
+                         Set chips and clock speed for individual devices
+
+  --zeus-nocheck-golden  Skip golden nonce verification during initialization (serial mode only)
+  --zeus-debug           Enable extra Zeus driver debugging output in verbose mode
+```
+
+The `zeus-chips` and `zeus-clock` options apply to every device unless overridden
+on a per-device basis using `zeus-options`. The ID values to use with that option
+depend on how CGMiner is communicating with the miners, explained in the next section.
 
 ### Device Selection ###
 
-With no `--scan-serial` options the driver will use libusb to autodetect any
-connected miners and to perform all device I/O operations. ~~This is the
-recommended method if multiple drivers are compiled into cgminer.~~
-Current production lots use a different USB-Serial chip for which the driver
-has not been fully updated yet. Using libusb will result in poor performance.
-Use one of the other options below.
+The driver supports using either libusb or directly reading/writing to the serial
+port to communicate with the miner. Libusb is generally more convenient on Linux
+while Windows users may prefer serial to bypass the requirement of installing special
+libusb drivers. Mode selection depends on the `scan-serial` option:
 
-If `--scan-serial zeus:auto` is specified, the driver will use libudev to
-identify which USB-serial ports are from a Zeus miner and open those ports
-directly. All I/O will be done using direct serial reads and writes
-(not through libusb). This method is not recommended if multiple drivers
-are compiled. This method is only available on Linux.
+ * By default with no `--scan-serial` options the driver will use libusb to autodetect
+   any connected miners and to perform all device I/O operations. In this mode the ID
+   assigned to each miner for use with `--zeus-options` will be the miner's serial number
+   (except for Blizzard models, see note below).
 
-Finally, devices can be specified manually using `--scan-serial zeus:/dev/ttyX`
-(note the "zeus:" is optional if only the Zeus driver has been compiled in). This
-disables autodetection (for the Zeus driver only) and all I/O will also be done
-using direct serial reads and writes instead of through libusb.
+ * For serial I/O each miner must be specified manually using `--scan-serial zeus:<PORT>`
+   and providing the path to the serial port (i.e. `/dev/ttyUSBx` on Linux or `\\.\COMx`
+   on Windows). The prefix "zeus:" is optional if CGMiner has been compiled with only the
+   Zeus driver enabled, otherwise it is required. In this mode the ID assigned to each
+   miner for use with `--zeus-options` will be the final part of the port (i.e.
+   `ttyUSBx` or `COMx`). Note that autodetection is not supported in this mode.
+
+ * On Linux systems only it is possible to use serial I/O and still have autodetection
+   by specifying `--scan-serial zeus:auto`. In this mode the driver will use libudev to
+   identify which USB-serial ports are from a Zeus miner. All I/O will still be done
+   using direct serial reads and writes (not through libusb) and the ID for each miner
+   will still be the final part of the port (ttyUSBx). This method is not recommended
+   if multiple drivers are compiled in as autodetection can be quirky in those cases.
 
 The following three examples are equivalent assuming three miners are connected:
 
 	# Using libusb
 	./cgminer --scrypt --zeus-chips 96 --zeus-clock 328
 	
-	# Direct serial I/O, auto-detect ports (Linux only)
-	./cgminer --scrypt --zeus-chips 96 --zeus-clock 328 --scan-serial zeus:auto
-	
 	# Direct serial I/O, manual port specification
 	./cgminer --scrypt --zeus-chips 96 --zeus-clock 328 --scan-serial /dev/ttyUSB0 \
 		--scan-serial /dev/ttyUSB1 --scan-serial /dev/ttyUSB2
+	
+	# Direct serial I/O, auto-detect ports (Linux only)
+	./cgminer --scrypt --zeus-chips 96 --zeus-clock 328 --scan-serial zeus:auto
 
-### Device Identification ###
+### Notes ###
 
-When using serial I/O the ID for use with `--zeus-options` is the full path name
-of the serial port (eg: /dev/ttyUSB0). If using libusb the ID is the miner's
-USB serial number, which can be found by running `./cgminer --ndevs` or on Linux
-by examining the output of `lsusb`. The ID is also shown on each device's status
-line on the main screen of cgminer.
+Blizzard ID note: Blizzard models use a different USB-Serial chip which does not provide
+a valid serial number. When using libusb mode with one of these the ID shown in CGMiner and
+used with `--zeus-options` is the USB bus and device address in this format:
+`<bus number>:<device address>`
 
-Note: Early hardware versions (at least batch 1) used a different USB-Serial chip
-which did not provide a valid serial number. In that case the ID used in CGMiner
-is the USB bus and device address in this format: `<bus number>:<device address>`
+Chip count for different models:
+Blizzard: 6, Hurricane X2: 48, Hurricane X3: 64, Thunder X2: 96, Thunder X3: 128
 
-Chip count for different models: Blizzard: 6, Cyclone: 96
+The model name displayed in the CGMiner UI depends on the chip count being specified correctly.
+It is not auto-determined.
 
 Zeus driver is based on [documentation][zeus] and the official reference implementation.
 Many thanks also to sling00 and LinuxETC for providing access to test hardware.
