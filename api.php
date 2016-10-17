@@ -1,6 +1,7 @@
 <?php
 #
 # Sample Socket I/O to CGMiner API
+#Grabs and parses some useful data and displays it in simple human-readable format. Also polls from litecoinpool and nicehash to get stats if you so choose!
 #
 
 #some definitions
