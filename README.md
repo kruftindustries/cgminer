@@ -7,6 +7,8 @@ This file describes Scrypt-specific settings and options.
 For general CGMiner information refer to README.
 Scrypt algorithm code was ported from CGMiner version 3.7.2.
 
+This project was forked from dmaxl/cgminer to add some functionality, specifically changing Zeus and Gridseed miner frequency on the fly via the API.
+
 ## Zeus ##
 
 	./autogen.sh
