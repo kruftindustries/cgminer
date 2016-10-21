@@ -66,6 +66,7 @@ static struct name_chip_map {
 	{ "Hurricane X3",	64 },
 	{ "Thunder X2",		96 },
 	{ "Thunder X3",		128 },
+	{ "Lightning X6",	256 }
 	{ NULL, 0 }
 };
 
