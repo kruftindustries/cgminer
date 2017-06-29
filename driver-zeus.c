@@ -1101,7 +1101,9 @@ static struct api_data *zeus_api_stats(struct cgpu_info *zeus)
 	 * but with more powerful miners with > 100 chips each with 8 cores
 	 * there is too much information and we'd overflow the api buffer.
 	 * Perhaps another api command to query individual chips? */
-
+	/*root = api_add_int(root, "Nonce/Chip", &(info->nonce_count[chip][core];), false);
+	root = api_add_int(root, "Error/Chip", &(info->error_count[chip][core];), false);
+	*/
 	/* these values are more for diagnostic and debugging */
 	if (opt_zeus_debug) {
 		root = api_add_int(root, "chips_count_max", &(info->chips_count_max), false);
